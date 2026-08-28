@@ -586,9 +586,11 @@
 const PRISTINE = "<!doctype html>\n" + document.documentElement.outerHTML;
 
 let state = JSON.parse(document.getElementById("state").textContent);
-let runtime = null;          // artifact capability namespace (null = demo mode)
+let runtime = null;          // artifact capability namespace
 let downloadsCap = null;
 let readOnly = false;        // set true after a not_writer / not_granted rejection
+let serverMode = false;      // true when a /api/state sync server is behind this page
+let serverVersion = 0;
 
 const LS_SESSION = "shiftly.session";
 const LS_STATE = "shiftly.demo.state";
@@ -645,11 +647,79 @@ let saving = false;
 
 function scheduleSave(immediate) {
   try { localStorage.setItem(LS_STATE, JSON.stringify(state)); } catch(e){}
-  if (!runtime) { setSaveState("Saved locally"); return; }
-  if (readOnly) return;
-  clearTimeout(saveTimer);
-  setSaveState("Saving…");
-  saveTimer = setTimeout(doPublish, immediate ? 0 : 1400);
+  if (runtime) {
+    if (readOnly) return;
+    clearTimeout(saveTimer);
+    setSaveState("Saving…");
+    saveTimer = setTimeout(doPublish, immediate ? 0 : 1400);
+  } else if (serverMode) {
+    clearTimeout(saveTimer);
+    setSaveState("Saving…");
+    saveTimer = setTimeout(doServerSave, immediate ? 0 : 1200);
+  } else {
+    setSaveState("Saved locally");
+  }
+}
+
+/* ---------- server sync (Railway or any host running server.js) ---------- */
+async function initServerSync() {
+  try {
+    const r = await fetch("api/state", { cache: "no-store" });
+    if (!r.ok) return false;
+    const data = await r.json();
+    if (!data || !data.state || !Array.isArray(data.state.employees)) return false;
+    state = data.state;
+    serverVersion = data.version || 0;
+    serverMode = true;
+    setInterval(pollServer, 15000);
+    return true;
+  } catch (e) { return false; }
+}
+
+async function pollServer() {
+  if (document.hidden || saving || pickerCtx) return;
+  try {
+    const r = await fetch("api/state", { cache: "no-store" });
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data.version > serverVersion) {
+      serverVersion = data.version;
+      state = data.state;
+      render();
+    }
+  } catch (e) {}
+}
+
+async function doServerSave() {
+  if (saving) return;
+  saving = true;
+  try {
+    const r = await fetch("api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: serverVersion, state })
+    });
+    if (r.status === 409) {
+      const data = await r.json();
+      serverVersion = data.version;
+      state = data.state;
+      setSaveState("");
+      toast("Someone saved just before you — showing the latest. Please redo your change.");
+      render();
+    } else if (r.ok) {
+      const data = await r.json();
+      serverVersion = data.version;
+      setSaveState("Saved ✓");
+      setTimeout(() => setSaveState(""), 2000);
+    } else {
+      setSaveState("Not saved");
+      toast("Couldn't save — please try again.");
+    }
+  } catch (e) {
+    setSaveState("Not saved");
+    toast("Couldn't reach the server — check your connection.");
+  }
+  saving = false;
 }
 
 async function doPublish() {
@@ -873,8 +943,8 @@ function render() {
   const entered = viewKey !== lastViewKey;
   lastViewKey = viewKey;
 
-  const banner = !runtime
-    ? '<div class="banner warning">⚠︎ Preview mode — changes are saved only in this browser. Open the published app for team-wide saving.</div>'
+  const banner = (!runtime && !serverMode)
+    ? '<div class="banner warning">⚠︎ Preview mode — changes are saved only in this browser. Open the team app for shared saving.</div>'
     : (readOnly ? '<div class="banner warning">⚠︎ You have view-only access, so changes can\'t be saved. Ask the owner to share edit access.</div>' : "");
 
   app.innerHTML =
@@ -1294,11 +1364,14 @@ function renderAdminSettings() {
     }
   } catch (e) { runtime = null; }
   if (!runtime) {
-    /* demo mode: restore locally saved state so the preview still behaves like an app */
-    try {
-      const saved = JSON.parse(localStorage.getItem(LS_STATE));
-      if (saved && saved.employees && saved.weeks) state = saved;
-    } catch(e){}
+    /* no artifact runtime: try a sync server (Railway etc.), else per-browser demo mode */
+    const synced = await initServerSync();
+    if (!synced) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(LS_STATE));
+        if (saved && saved.employees && saved.weeks) state = saved;
+      } catch(e){}
+    }
   }
   render();
 })();
