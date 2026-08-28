@@ -1,0 +1,1260 @@
+<title>Shiftly</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+  /* ---------- Design tokens : Apple-style ---------- */
+  :root {
+    --bg: #F5F5F7;
+    --card: #FFFFFF;
+    --card-2: #F2F2F4;
+    --text: #1D1D1F;
+    --text-2: #6E6E73;
+    --text-3: #AEAEB2;
+    --sep: rgba(0,0,0,0.08);
+    --accent: #0071E3;
+    --accent-soft: rgba(0,113,227,0.10);
+    --on-accent: #FFFFFF;
+    --good: #34C759;
+    --good-soft: rgba(52,199,89,0.14);
+    --warn: #FF9500;
+    --warn-soft: rgba(255,149,0,0.14);
+    --bad: #FF3B30;
+    --bad-soft: rgba(255,59,48,0.12);
+    --chip: #E9E9EC;
+    --bar: rgba(245,245,247,0.78);
+    --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
+    --thumb-shadow: 0 1px 4px rgba(0,0,0,0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161617;
+      --card: #1D1D1F;
+      --card-2: #2C2C2E;
+      --text: #F5F5F7;
+      --text-2: #98989D;
+      --text-3: #636366;
+      --sep: rgba(255,255,255,0.10);
+      --accent: #0A84FF;
+      --accent-soft: rgba(10,132,255,0.16);
+      --on-accent: #FFFFFF;
+      --good: #30D158;
+      --good-soft: rgba(48,209,88,0.18);
+      --warn: #FF9F0A;
+      --warn-soft: rgba(255,159,10,0.18);
+      --bad: #FF453A;
+      --bad-soft: rgba(255,69,58,0.16);
+      --chip: #3A3A3C;
+      --bar: rgba(22,22,23,0.72);
+      --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 8px 24px rgba(0,0,0,0.35);
+      --thumb-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161617;
+    --card: #1D1D1F;
+    --card-2: #2C2C2E;
+    --text: #F5F5F7;
+    --text-2: #98989D;
+    --text-3: #636366;
+    --sep: rgba(255,255,255,0.10);
+    --accent: #0A84FF;
+    --accent-soft: rgba(10,132,255,0.16);
+    --on-accent: #FFFFFF;
+    --good: #30D158;
+    --good-soft: rgba(48,209,88,0.18);
+    --warn: #FF9F0A;
+    --warn-soft: rgba(255,159,10,0.18);
+    --bad: #FF453A;
+    --bad-soft: rgba(255,69,58,0.16);
+    --chip: #3A3A3C;
+    --bar: rgba(22,22,23,0.72);
+    --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 8px 24px rgba(0,0,0,0.35);
+    --thumb-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  }
+
+  :root {
+    /* Strong custom curves — built-in CSS easings are too weak */
+    --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+    --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+  input, select, textarea {
+    font: inherit; color: var(--text);
+    background: var(--card-2);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 10px 14px;
+    outline: none;
+    width: 100%;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  @media (prefers-reduced-motion: reduce) {
+    /* gentler, not zero: keep color/opacity fades, drop movement */
+    * { animation: none !important; }
+    .picker, .toast, .toggle .knob, .cell, .btn, .icon-btn, .addbtn, .pick-row {
+      transition-property: opacity, background-color, border-color, color !important;
+    }
+    .toast { transform: translate(-50%, 0); }
+    .picker { transform: none; }
+  }
+
+  /* ---------- Layout ---------- */
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--bar);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--sep);
+  }
+  .topbar-inner {
+    max-width: 1060px; margin: 0 auto; padding: 10px 20px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; letter-spacing: -0.02em; }
+  .brand-mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), #5AC8FA);
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 14px; font-weight: 800;
+  }
+  .spacer { flex: 1; }
+  .userbox { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--accent);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+  }
+  .signout { color: var(--accent); font-weight: 500; font-size: 13px; }
+
+  .container { max-width: 1060px; margin: 0 auto; padding: 24px 20px 80px; }
+
+  .page-title { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; margin: 6px 0 2px; text-wrap: balance; }
+  .page-sub { color: var(--text-2); margin: 0 0 20px; }
+
+  /* Segmented control */
+  .seg {
+    display: inline-flex; background: var(--chip); border-radius: 12px; padding: 3px; gap: 2px;
+    margin-bottom: 22px; max-width: 100%; overflow-x: auto;
+  }
+  .seg button {
+    padding: 7px 16px; border-radius: 9px; font-size: 14px; font-weight: 600;
+    color: var(--text-2); white-space: nowrap;
+    transition: background-color 180ms var(--ease-out-strong), color 180ms ease;
+  }
+  .seg button.on { background: var(--card); color: var(--text); box-shadow: var(--thumb-shadow); }
+
+  /* Week nav */
+  .weeknav { display: flex; align-items: center; gap: 6px; }
+  .weeknav .wk-label { font-weight: 600; font-size: 14px; min-width: 150px; text-align: center; font-variant-numeric: tabular-nums; }
+  .icon-btn {
+    width: 32px; height: 32px; border-radius: 50%; background: var(--chip);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 15px; color: var(--text);
+    transition: background-color 150ms ease, transform 160ms var(--ease-out-strong);
+  }
+  .icon-btn:active { transform: scale(0.92); }
+
+  .card {
+    background: var(--card); border-radius: 18px; box-shadow: var(--shadow);
+    padding: 20px; margin-bottom: 16px;
+  }
+  .card h3 { margin: 0 0 4px; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+  .card .sub { color: var(--text-2); font-size: 13px; margin: 0 0 14px; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    background: var(--accent); color: var(--on-accent);
+    border-radius: 980px; padding: 10px 22px; font-weight: 600; font-size: 15px;
+    transition: filter 160ms ease, transform 160ms var(--ease-out-strong);
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn.secondary { background: var(--chip); color: var(--text); }
+  .btn.small { padding: 6px 14px; font-size: 13px; }
+  .btn.danger { background: var(--bad-soft); color: var(--bad); }
+  .btn:disabled { opacity: .5; cursor: default; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    border-radius: 980px; padding: 3px 10px; font-size: 12px; font-weight: 600;
+  }
+  .pill.good { background: var(--good-soft); color: var(--good); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.bad  { background: var(--bad-soft);  color: var(--bad); }
+  .pill.neutral { background: var(--chip); color: var(--text-2); }
+  .pill.accent { background: var(--accent-soft); color: var(--accent); }
+
+  /* ---------- Sign-in ---------- */
+  .signin-wrap {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background: var(--bg);
+  }
+  .signin-card {
+    width: 100%; max-width: 400px; background: var(--card); border-radius: 24px;
+    box-shadow: var(--shadow); padding: 40px 34px; text-align: center;
+  }
+  .signin-logo {
+    width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 18px;
+    background: linear-gradient(135deg, var(--accent), #5AC8FA);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 30px; font-weight: 800;
+    box-shadow: 0 8px 24px var(--accent-soft);
+  }
+  .signin-card h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 6px; }
+  .signin-card p { color: var(--text-2); margin: 0 0 24px; font-size: 14px; }
+  .signin-card form { display: flex; flex-direction: column; gap: 12px; text-align: left; }
+  .signin-card label { font-size: 12px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: -6px; }
+  .signin-err { color: var(--bad); font-size: 13px; margin: 4px 0 0; }
+  .signin-foot { margin-top: 20px; font-size: 12px; color: var(--text-3); }
+
+  /* ---------- Worker availability grid ---------- */
+  .avail-grid { display: flex; flex-direction: column; gap: 10px; }
+  .day-row {
+    display: grid; grid-template-columns: 120px 1fr; gap: 14px; align-items: center;
+    padding: 12px 14px; background: var(--card-2); border-radius: 14px;
+  }
+  .day-name { font-weight: 700; font-size: 14px; }
+  .day-date { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .shift-cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .cell {
+    border-radius: 12px; padding: 9px 6px; text-align: center;
+    background: var(--card); border: 1.5px solid var(--sep);
+    transition: background-color 140ms ease, border-color 140ms ease, transform 160ms var(--ease-out-strong);
+    user-select: none; -webkit-user-select: none;
+  }
+  .cell:active { transform: scale(0.95); }
+  .cell .c-name { font-size: 12px; font-weight: 600; display: block; }
+  .cell .c-state { font-size: 11px; display: block; margin-top: 2px; color: var(--text-3); font-weight: 500; }
+  .cell.yes  { background: var(--good-soft); border-color: var(--good); }
+  .cell.yes .c-state { color: var(--good); }
+  .cell.pref { background: var(--accent-soft); border-color: var(--accent); }
+  .cell.pref .c-state { color: var(--accent); }
+  .cell.no   { background: var(--bad-soft); border-color: var(--bad); }
+  .cell.no .c-state { color: var(--bad); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 14px 0 0; font-size: 12px; color: var(--text-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .dot.d-yes { background: var(--good); } .dot.d-pref { background: var(--accent); }
+  .dot.d-no { background: var(--bad); } .dot.d-unset { background: var(--chip); border: 1px solid var(--sep); }
+
+  .submit-bar { display: flex; align-items: center; gap: 14px; margin-top: 18px; flex-wrap: wrap; }
+  .submit-note { color: var(--text-2); font-size: 13px; }
+
+  /* ---------- My schedule ---------- */
+  .mysched { display: flex; flex-direction: column; gap: 8px; }
+  .mysched-row {
+    display: flex; align-items: center; gap: 14px; padding: 13px 16px;
+    background: var(--card-2); border-radius: 14px;
+  }
+  .mysched-row .d { width: 110px; font-weight: 700; font-size: 14px; }
+  .mysched-row .d small { display: block; font-weight: 400; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .shift-badge {
+    display: inline-flex; flex-direction: column; padding: 6px 14px; border-radius: 11px;
+    background: var(--accent-soft); color: var(--accent);
+  }
+  .shift-badge b { font-size: 13px; }
+  .shift-badge small { font-size: 11px; opacity: .85; font-variant-numeric: tabular-nums; }
+  .off { color: var(--text-3); font-size: 13px; }
+
+  /* Worker: full team schedule */
+  .team-day { padding: 11px 0; border-bottom: 1px solid var(--sep); }
+  .team-day:last-child { border-bottom: none; padding-bottom: 0; }
+  .td-head { font-weight: 700; font-size: 13px; margin-bottom: 7px; }
+  .td-head small { color: var(--text-2); font-weight: 400; font-variant-numeric: tabular-nums; }
+  .team-shift-row { display: flex; align-items: flex-start; gap: 10px; padding: 3px 0; }
+  .ts-name { width: 140px; flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--text-2); padding-top: 3px; }
+  .ts-name small { font-weight: 400; color: var(--text-3); font-variant-numeric: tabular-nums; display: block; }
+  .ts-people { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; }
+  .ts-chip {
+    display: inline-flex; background: var(--card-2); border-radius: 980px;
+    padding: 4px 12px; font-size: 12px; font-weight: 500;
+  }
+  .ts-chip.me { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+  /* ---------- Admin: availability matrix ---------- */
+  .matrix-wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+  table.matrix { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 760px; }
+  .matrix th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--text-2); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--sep);
+    white-space: nowrap;
+  }
+  .matrix th small { display: block; text-transform: none; letter-spacing: 0; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .matrix td { padding: 9px 10px; border-bottom: 1px solid var(--sep); vertical-align: middle; }
+  .matrix tr:last-child td { border-bottom: none; }
+  .emp-cell { display: flex; align-items: center; gap: 10px; min-width: 150px; }
+  .emp-cell .nm { font-weight: 600; font-size: 13px; white-space: nowrap; }
+  .emp-cell .st { font-size: 11px; color: var(--text-3); }
+  .mini-cells { display: flex; gap: 4px; }
+  .mini {
+    width: 22px; height: 22px; border-radius: 6px; font-size: 10px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--chip); color: var(--text-3); border: 1px solid transparent;
+  }
+  .mini.yes { background: var(--good-soft); color: var(--good); }
+  .mini.pref { background: var(--accent-soft); color: var(--accent); }
+  .mini.no { background: var(--bad-soft); color: var(--bad); }
+
+  /* ---------- Admin: schedule builder ---------- */
+  .sched-day { margin-bottom: 14px; }
+  .sched-day-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .sched-day-head h4 { margin: 0; font-size: 15px; font-weight: 700; }
+  .sched-day-head small { color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .shift-row {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 14px; background: var(--card-2); border-radius: 13px; margin-bottom: 6px;
+  }
+  .shift-row .s-label { width: 130px; }
+  .shift-row .s-label b { font-size: 13px; display: block; }
+  .shift-row .s-label small { color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .assigned { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--card); border: 1px solid var(--sep);
+    border-radius: 980px; padding: 4px 6px 4px 12px; font-size: 13px; font-weight: 500;
+  }
+  .chip .x {
+    width: 18px; height: 18px; border-radius: 50%; background: var(--chip);
+    font-size: 11px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2);
+  }
+  .chip.warnchip { border-color: var(--warn); background: var(--warn-soft); }
+  .addbtn {
+    border: 1.5px dashed var(--text-3); color: var(--text-2); border-radius: 980px;
+    padding: 4px 14px; font-size: 13px; font-weight: 500;
+    transition: color 150ms ease, border-color 150ms ease, transform 160ms var(--ease-out-strong);
+  }
+  .addbtn:active { transform: scale(0.96); }
+  .count { font-variant-numeric: tabular-nums; }
+
+  /* Picker */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 100;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    opacity: 1; transition: opacity 200ms ease-out;
+  }
+  .picker {
+    background: var(--card); border-radius: 20px; box-shadow: var(--shadow);
+    width: 100%; max-width: 420px; max-height: 76vh; overflow-y: auto; padding: 22px;
+    opacity: 1; transform: translateY(0) scale(1);
+    transition: opacity 200ms var(--ease-out-strong), transform 280ms var(--ease-sheet);
+  }
+  @starting-style {
+    .overlay { opacity: 0; }
+    .picker { opacity: 0; transform: translateY(12px) scale(0.97); }
+  }
+  .picker h4 { margin: 0 0 2px; font-size: 16px; }
+  .picker .sub { color: var(--text-2); font-size: 13px; margin: 0 0 14px; }
+  .pick-group { margin-bottom: 12px; }
+  .pick-group .g-label { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; font-weight: 700; margin-bottom: 6px; }
+  .pick-group.g-pref .g-label { color: var(--accent); }
+  .pick-group.g-yes .g-label { color: var(--good); }
+  .pick-group.g-unset .g-label { color: var(--text-3); }
+  .pick-group.g-no .g-label { color: var(--bad); }
+  .pick-row {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 9px 10px; border-radius: 11px; text-align: left;
+    transition: background-color 140ms ease, transform 160ms var(--ease-out-strong);
+  }
+  .pick-row:active { transform: scale(0.98); }
+  .pick-row .nm { font-weight: 600; font-size: 14px; flex: 1; }
+  .pick-row .meta { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .picker-close { margin-top: 8px; width: 100%; }
+
+  /* ---------- Team ---------- */
+  .team-row { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--sep); }
+  .team-row:last-child { border-bottom: none; }
+  .team-row .info { flex: 1; min-width: 0; }
+  .team-row .info b { display: block; font-size: 14px; }
+  .team-row .info small { color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
+  .team-add { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; margin-top: 14px; }
+
+  /* ---------- Settings ---------- */
+  .set-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--sep); flex-wrap: wrap; }
+  .set-row:last-child { border-bottom: none; }
+  .set-row .lbl { flex: 1; min-width: 160px; }
+  .set-row .lbl b { display: block; font-size: 14px; font-weight: 600; }
+  .set-row .lbl small { color: var(--text-2); font-size: 12px; }
+  .set-row input[type="time"] { width: 108px; }
+  .set-row input[type="number"] { width: 76px; text-align: center; }
+  .set-row input[type="text"] { max-width: 240px; }
+
+  /* Toggle */
+  .toggle { position: relative; width: 48px; height: 29px; border-radius: 980px; background: var(--chip); transition: background-color 200ms ease; flex-shrink: 0; }
+  .toggle.on { background: var(--good); }
+  .toggle .knob {
+    position: absolute; top: 2.5px; left: 2.5px; width: 24px; height: 24px;
+    border-radius: 50%; background: #fff; box-shadow: var(--thumb-shadow);
+    transform: translateX(0); transition: transform 240ms var(--ease-sheet);
+  }
+  .toggle.on .knob { transform: translateX(19px); }
+  .toggle:active .knob { transform: translateX(0) scale(0.94); }
+  .toggle.on:active .knob { transform: translateX(19px) scale(0.94); }
+
+  /* Banners & toast */
+  .banner {
+    border-radius: 14px; padding: 11px 16px; font-size: 13px; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .banner.info { background: var(--accent-soft); color: var(--accent); }
+  .banner.warning { background: var(--warn-soft); color: var(--warn); }
+  .toast {
+    position: fixed; bottom: 26px; left: 50%; transform: translate(-50%, 14px) scale(0.97);
+    background: var(--text); color: var(--bg); border-radius: 980px;
+    padding: 9px 22px; font-size: 13px; font-weight: 600; z-index: 200;
+    box-shadow: var(--shadow); opacity: 0; pointer-events: none;
+    max-width: 90vw; text-align: center;
+    transition: opacity 300ms ease, transform 300ms var(--ease-out-strong);
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  .savestate { font-size: 12px; color: var(--text-3); min-width: 60px; text-align: right; }
+
+  .stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat {
+    background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 16px 18px;
+  }
+  .stat .v { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .stat .k { font-size: 12px; color: var(--text-2); font-weight: 500; }
+
+  /* View-change entrance: staggered rise, only when the view actually changes.
+     Data mutations re-render without the .enter class, so taps stay instant. */
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+  .container.enter > * { animation: rise 320ms var(--ease-out-strong) backwards; }
+  .container.enter > *:nth-child(2) { animation-delay: 30ms; }
+  .container.enter > *:nth-child(3) { animation-delay: 60ms; }
+  .container.enter > *:nth-child(4) { animation-delay: 90ms; }
+  .container.enter > *:nth-child(5) { animation-delay: 120ms; }
+  .container.enter > *:nth-child(6) { animation-delay: 150ms; }
+
+  @keyframes rise-lg { from { opacity: 0; transform: translateY(14px) scale(0.98); } }
+  .signin-card { animation: rise-lg 480ms var(--ease-sheet) backwards; }
+
+  /* Hover states only for real pointers — touch taps shouldn't stick */
+  @media (hover: hover) and (pointer: fine) {
+    .signout:hover { text-decoration: underline; }
+    .icon-btn:hover { background: var(--sep); }
+    .btn:hover { filter: brightness(1.08); }
+    .chip .x:hover { background: var(--bad-soft); color: var(--bad); }
+    .addbtn:hover { border-color: var(--accent); color: var(--accent); }
+    .pick-row:hover { background: var(--card-2); }
+    .cell:hover { border-color: var(--text-3); }
+  }
+
+  @media (max-width: 640px) {
+    .day-row { grid-template-columns: 1fr; gap: 8px; }
+    .shift-row .s-label { width: 100%; }
+    .team-add { grid-template-columns: 1fr; }
+    .weeknav .wk-label { min-width: 120px; font-size: 13px; }
+    .page-title { font-size: 24px; }
+  }
+</style>
+
+<script id="state" type="application/json">
+{
+  "settings": {
+    "company": "Cybereason",
+    "shifts": [
+      { "id": "morning", "name": "Morning", "start": "07:00", "end": "15:00" },
+      { "id": "evening", "name": "Evening", "start": "14:30", "end": "23:00" },
+      { "id": "night",   "name": "Night",   "start": "23:00", "end": "07:00" }
+    ],
+    "required": { "morning": 2, "evening": 2, "night": 2 }
+  },
+  "employees": [
+    { "id": "e1", "name": "Nirit", "email": "niritzik23@gmail.com", "admin": true, "position": "Manager" },
+    { "id": "e2", "name": "Daniel Cohen", "email": "daniel@example.com", "admin": false, "position": "Shift worker" },
+    { "id": "e3", "name": "Maya Levi", "email": "maya@example.com", "admin": false, "position": "Shift worker" },
+    { "id": "e4", "name": "Tom Peretz", "email": "tom@example.com", "admin": false, "position": "Shift worker" },
+    { "id": "e5", "name": "Sara Mizrahi", "email": "sara@example.com", "admin": false, "position": "Shift worker" },
+    { "id": "evwqlve", "name": "nir cyber", "email": "nir@cyberreason.com", "admin": false, "position": "Shift worker" },
+    { "id": "e0oi2hu", "name": "nir cyber", "email": "nir.itzik@cybereason", "admin": false, "position": "Shift worker" },
+    { "id": "ey4fxpf", "name": "nir cyber", "email": "nir.itzik@cybereason.com", "admin": false, "position": "Shift worker" },
+    { "id": "elp44dc", "name": "nir123", "email": "nir.itzik@cybereason.com", "admin": false, "position": "Shift worker" }
+  ],
+  "weeks": {
+    "2026-08-30": {
+      "locked": true,
+      "published": true,
+      "assignments": {
+        "0.morning": ["e3", "e2"], "0.evening": ["ey4fxpf", "e5"], "0.night": ["e4", "e1"],
+        "1.morning": ["e2", "e4"], "1.evening": ["e3", "evwqlve"], "1.night": ["ey4fxpf"],
+        "2.morning": ["evwqlve", "e4"], "2.evening": ["e2", "e3"], "2.night": ["ey4fxpf"],
+        "3.morning": ["e3", "ey4fxpf"], "3.evening": ["e2", "e0oi2hu"], "3.night": ["e4"],
+        "4.morning": ["e2"], "4.evening": ["evwqlve", "e3"], "4.night": ["e4"],
+        "5.morning": ["e2"], "5.evening": ["e4", "e0oi2hu"], "5.night": ["e3"],
+        "6.morning": ["e3"], "6.evening": ["evwqlve", "e4"], "6.night": ["e2", "e0oi2hu"]
+      },
+      "submissions": {
+        "e2": { "note": "", "submittedAt": "2026-08-27T09:12:00Z", "cells": {
+          "0.morning": "pref", "0.evening": "yes", "1.morning": "yes", "1.evening": "yes",
+          "2.evening": "pref", "2.night": "yes", "3.morning": "no", "3.evening": "yes",
+          "4.morning": "yes", "5.morning": "yes", "5.evening": "yes", "6.night": "yes" } },
+        "e3": { "note": "Studying Tuesdays — evenings only that day", "submittedAt": "2026-08-27T14:40:00Z", "cells": {
+          "0.morning": "yes", "0.night": "yes", "1.evening": "pref", "1.night": "yes",
+          "2.evening": "yes", "3.morning": "yes", "3.evening": "pref", "4.evening": "yes",
+          "5.night": "yes", "6.morning": "yes", "6.evening": "yes" } },
+        "e4": { "note": "", "submittedAt": "2026-08-28T08:05:00Z", "cells": {
+          "0.evening": "yes", "0.night": "pref", "1.morning": "yes", "1.night": "yes",
+          "2.morning": "yes", "2.night": "pref", "3.night": "yes", "4.morning": "no",
+          "4.night": "yes", "5.evening": "yes", "6.evening": "yes", "6.night": "pref" } },
+        "evwqlve": { "note": "", "submittedAt": "2026-08-28T11:09:27.286Z", "cells": {
+          "0.morning": "yes", "1.evening": "yes", "2.morning": "yes",
+          "4.evening": "yes", "6.evening": "yes" } },
+        "e0oi2hu": { "note": "", "submittedAt": "2026-08-28T11:12:04.097Z", "cells": {
+          "0.morning": "yes", "1.evening": "yes", "2.evening": "yes", "3.evening": "yes",
+          "4.evening": "yes", "5.evening": "yes", "6.evening": "yes", "6.night": "yes" } },
+        "ey4fxpf": { "note": "", "submittedAt": "2026-08-28T12:59:33.404Z", "cells": {
+          "0.morning": "yes", "0.evening": "yes", "0.night": "yes",
+          "1.morning": "yes", "1.evening": "yes", "1.night": "yes",
+          "2.morning": "yes", "2.evening": "yes", "2.night": "yes",
+          "3.morning": "yes", "3.evening": "yes", "3.night": "yes" } }
+      }
+    },
+    "2026-08-16": { "locked": false, "published": false, "assignments": {}, "submissions": {} },
+    "2026-08-23": { "locked": false, "published": false, "assignments": {}, "submissions": {
+      "ey4fxpf": { "cells": {}, "note": "", "submittedAt": null } } },
+    "2026-09-06": { "locked": false, "published": false, "assignments": {}, "submissions": {} }
+  }
+}
+</script>
+
+<div id="app"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+
+/* Capture the pristine page source before anything renders or is typed.
+   Publishing rebuilds this source with fresh state — never the live DOM. */
+const PRISTINE = "<!doctype html>\n" + document.documentElement.outerHTML;
+
+let state = JSON.parse(document.getElementById("state").textContent);
+let runtime = null;          // artifact capability namespace (null = demo mode)
+let downloadsCap = null;
+let readOnly = false;        // set true after a not_writer / not_granted rejection
+
+const LS_SESSION = "shiftly.session";
+const LS_STATE = "shiftly.demo.state";
+
+const ui = loadSession() || { email: null, tab: null, week: null };
+
+/* ---------- date helpers (week starts Sunday) ---------- */
+const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const DAY_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+function fmtKey(d) {
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), dd = String(d.getDate()).padStart(2,"0");
+  return y + "-" + m + "-" + dd;
+}
+function parseKey(k) { const [y,m,d] = k.split("-").map(Number); return new Date(y, m-1, d); }
+function startOfWeek(d) { const c = new Date(d); c.setDate(c.getDate() - c.getDay()); c.setHours(0,0,0,0); return c; }
+function nextWeekKey() { const s = startOfWeek(new Date()); s.setDate(s.getDate()+7); return fmtKey(s); }
+function shiftWeek(key, delta) { const d = parseKey(key); d.setDate(d.getDate() + 7*delta); return fmtKey(d); }
+function dayDate(weekKey, idx) { const d = parseKey(weekKey); d.setDate(d.getDate()+idx); return d; }
+function fmtShort(d) { return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }); }
+function weekLabel(key) {
+  const a = parseKey(key), b = dayDate(key, 6);
+  return fmtShort(a) + " – " + fmtShort(b);
+}
+
+/* ---------- state accessors ---------- */
+function getWeek(key) {
+  if (!state.weeks[key]) state.weeks[key] = { locked:false, published:false, assignments:{}, submissions:{} };
+  return state.weeks[key];
+}
+function findEmp(email) {
+  if (!email) return null;
+  const e = email.trim().toLowerCase();
+  return state.employees.find(x => x.email.toLowerCase() === e) || null;
+}
+function empById(id) { return state.employees.find(x => x.id === id) || null; }
+function currentUser() { return findEmp(ui.email); }
+function initials(name) { return name.split(/\s+/).map(w => w[0]).slice(0,2).join("").toUpperCase(); }
+
+/* ---------- persistence ---------- */
+function loadSession() { try { return JSON.parse(localStorage.getItem(LS_SESSION)); } catch(e){ return null; } }
+function saveSession() { try { localStorage.setItem(LS_SESSION, JSON.stringify(ui)); } catch(e){} }
+
+function buildHtml() {
+  const json = JSON.stringify(state, null, 1).replace(/</g, "\\u003c");
+  return PRISTINE.replace(
+    /(<script id="state" type="application\/json">)[\s\S]*?(<\/script>)/,
+    (m, a, b) => a + "\n" + json + "\n" + b
+  );
+}
+
+let saveTimer = null;
+let saving = false;
+
+function scheduleSave(immediate) {
+  try { localStorage.setItem(LS_STATE, JSON.stringify(state)); } catch(e){}
+  if (!runtime) { setSaveState("Saved locally"); return; }
+  if (readOnly) return;
+  clearTimeout(saveTimer);
+  setSaveState("Saving…");
+  saveTimer = setTimeout(doPublish, immediate ? 0 : 1400);
+}
+
+async function doPublish() {
+  if (!runtime || saving) return;
+  saving = true;
+  try {
+    await runtime.publish(buildHtml());
+    /* on success the page reloads to the new version */
+  } catch (err) {
+    saving = false;
+    const code = err && err.code;
+    if (code === "not_granted" || code === "not_writer") {
+      readOnly = true;
+      setSaveState("");
+      toast("View-only access — changes can't be saved. Ask the owner for edit access.");
+      render();
+    } else if (code === "conflict") {
+      /* another view published first; the runtime reloads us to the winner */
+      setSaveState("");
+    } else {
+      setSaveState("Not saved");
+      toast("Couldn't save — please try again.");
+    }
+  }
+}
+
+function setSaveState(txt) {
+  const el = document.getElementById("savestate");
+  if (el) el.textContent = txt;
+}
+
+/* ---------- toast ---------- */
+let toastTimer = null;
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
+}
+
+/* ---------- mutations ---------- */
+function signIn(email) {
+  const emp = findEmp(email);
+  if (!emp) return false;
+  ui.email = emp.email;
+  ui.tab = emp.admin ? "availability" : "submit";
+  if (!ui.week) ui.week = nextWeekKey();
+  saveSession(); render();
+  return true;
+}
+function registerWorker(name, email) {
+  if (findEmp(email)) { signIn(email); return; } /* email already on the team — just sign in */
+  const id = "e" + Math.random().toString(36).slice(2, 8);
+  state.employees.push({ id, name: name.trim(), email: email.trim(), admin: false, position: "Shift worker" });
+  scheduleSave(true);
+  ui.email = email.trim(); ui.tab = "submit";
+  if (!ui.week) ui.week = nextWeekKey();
+  saveSession(); render();
+}
+function signOut() { ui.email = null; saveSession(); render(); }
+
+function cycleCell(dayIdx, shiftId) {
+  const me = currentUser(); if (!me) return;
+  const wk = getWeek(ui.week);
+  if (wk.locked) { toast("Submissions for this week are closed."); return; }
+  const sub = wk.submissions[me.id] || (wk.submissions[me.id] = { cells:{}, note:"", submittedAt:null });
+  const key = dayIdx + "." + shiftId;
+  const order = [undefined, "yes", "pref", "no"];
+  const cur = sub.cells[key];
+  const next = order[(order.indexOf(cur) + 1) % order.length];
+  if (next === undefined) delete sub.cells[key]; else sub.cells[key] = next;
+  render(); /* redraw immediately; publish happens on Submit */
+}
+
+function submitAvailability() {
+  const me = currentUser(); if (!me) return;
+  const wk = getWeek(ui.week);
+  if (wk.locked) { toast("Submissions for this week are closed."); return; }
+  const sub = wk.submissions[me.id] || (wk.submissions[me.id] = { cells:{}, note:"", submittedAt:null });
+  const noteEl = document.getElementById("worker-note");
+  if (noteEl) sub.note = noteEl.value.trim();
+  sub.submittedAt = new Date().toISOString();
+  toast(runtime ? "Availability submitted ✓" : "Availability saved (preview mode)");
+  scheduleSave(true);
+  render();
+}
+
+function toggleAssign(dayIdx, shiftId, empId) {
+  const wk = getWeek(ui.week);
+  const key = dayIdx + "." + shiftId;
+  const list = wk.assignments[key] || (wk.assignments[key] = []);
+  const i = list.indexOf(empId);
+  if (i >= 0) list.splice(i, 1); else list.push(empId);
+  if (!list.length) delete wk.assignments[key];
+  pickerCtx = null;
+  scheduleSave(false);
+  render();
+}
+
+function autoFill() {
+  const wk = getWeek(ui.week);
+  const totals = {};
+  state.employees.forEach(e => totals[e.id] = 0);
+  Object.values(wk.assignments).forEach(l => l.forEach(id => totals[id] = (totals[id]||0)+1));
+  for (let d = 0; d < 7; d++) {
+    for (const sh of state.settings.shifts) {
+      const key = d + "." + sh.id;
+      const need = state.settings.required[sh.id] || 0;
+      const list = wk.assignments[key] || (wk.assignments[key] = []);
+      const busyToday = new Set();
+      state.settings.shifts.forEach(s2 => (wk.assignments[d + "." + s2.id] || []).forEach(id => busyToday.add(id)));
+      const rank = { pref: 0, yes: 1 };
+      const cands = state.employees
+        .filter(e => !e.admin || wk.submissions[e.id])
+        .filter(e => !list.includes(e.id) && !busyToday.has(e.id))
+        .map(e => ({ e, av: (wk.submissions[e.id] || {cells:{}}).cells[key] }))
+        .filter(c => c.av === "yes" || c.av === "pref")
+        .sort((a,b) => (rank[a.av] - rank[b.av]) || (totals[a.e.id] - totals[b.e.id]));
+      while (list.length < need && cands.length) {
+        const c = cands.shift();
+        list.push(c.e.id); busyToday.add(c.e.id); totals[c.e.id]++;
+      }
+      if (!list.length) delete wk.assignments[key];
+    }
+  }
+  toast("Auto-fill complete — review and adjust, then publish.");
+  scheduleSave(false);
+  render();
+}
+
+function clearWeek() {
+  const wk = getWeek(ui.week);
+  wk.assignments = {}; wk.published = false;
+  scheduleSave(false); render();
+}
+
+function publishSchedule() {
+  const wk = getWeek(ui.week);
+  wk.published = !wk.published;
+  toast(wk.published ? "Schedule published — workers can now see their shifts." : "Schedule unpublished.");
+  scheduleSave(true); render();
+}
+
+function toggleLock() {
+  const wk = getWeek(ui.week);
+  wk.locked = !wk.locked;
+  toast(wk.locked ? "Submissions closed for this week." : "Submissions reopened.");
+  scheduleSave(false); render();
+}
+
+function addEmployee(name, email) {
+  if (!name.trim() || !/.+@.+\..+/.test(email.trim())) { toast("Enter a name and a valid email."); return; }
+  if (findEmp(email)) { toast("That email is already on the team."); return; }
+  const id = "e" + Math.random().toString(36).slice(2, 8);
+  state.employees.push({ id, name: name.trim(), email: email.trim(), admin: false, position: "Shift worker" });
+  scheduleSave(false); render();
+}
+function removeEmployee(id) {
+  const emp = empById(id); if (!emp) return;
+  if (emp.admin && state.employees.filter(e => e.admin).length === 1) { toast("You can't remove the only admin."); return; }
+  state.employees = state.employees.filter(e => e.id !== id);
+  Object.values(state.weeks).forEach(wk => {
+    delete wk.submissions[id];
+    Object.keys(wk.assignments).forEach(k => {
+      wk.assignments[k] = wk.assignments[k].filter(x => x !== id);
+      if (!wk.assignments[k].length) delete wk.assignments[k];
+    });
+  });
+  scheduleSave(false); render();
+}
+function toggleAdmin(id) {
+  const emp = empById(id); if (!emp) return;
+  if (emp.admin && state.employees.filter(e => e.admin).length === 1) { toast("At least one admin is required."); return; }
+  emp.admin = !emp.admin;
+  scheduleSave(false); render();
+}
+
+function updateShiftTime(shiftId, field, value) {
+  const sh = state.settings.shifts.find(s => s.id === shiftId);
+  if (sh && value) { sh[field] = value; scheduleSave(false); }
+}
+function updateRequired(shiftId, value) {
+  const n = Math.max(0, Math.min(20, parseInt(value, 10) || 0));
+  state.settings.required[shiftId] = n;
+  scheduleSave(false); render();
+}
+function updateCompany(v) { state.settings.company = v.trim() || "My Company"; scheduleSave(false); }
+
+async function exportCsv() {
+  const wk = getWeek(ui.week);
+  const rows = [["Date","Day","Shift","Hours","Assigned"]];
+  for (let d = 0; d < 7; d++) {
+    for (const sh of state.settings.shifts) {
+      const names = (wk.assignments[d + "." + sh.id] || []).map(id => (empById(id)||{name:"?"}).name).join("; ");
+      rows.push([fmtKey(dayDate(ui.week, d)), DAY_NAMES[d], sh.name, sh.start + "–" + sh.end, names]);
+    }
+  }
+  const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(",")).join("\r\n");
+  if (downloadsCap) {
+    try { await downloadsCap.save({ filename: "schedule-" + ui.week + ".csv", data: csv }); }
+    catch(e) { /* viewer declined */ }
+  } else {
+    toast("Export is available in the published app.");
+  }
+}
+
+/* ---------- rendering ---------- */
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+let signinAskName = false;   /* registration step */
+let pickerCtx = null;        /* {dayIdx, shiftId} when picker open */
+let lastViewKey = "";        /* stagger entrance only on real view changes */
+
+function render() {
+  const app = document.getElementById("app");
+  const me = currentUser();
+  if (!me) { lastViewKey = "signin"; app.innerHTML = renderSignin(); return; }
+  if (!ui.week) ui.week = nextWeekKey();
+  const viewKey = me.id + "|" + ui.tab + "|" + ui.week;
+  const entered = viewKey !== lastViewKey;
+  lastViewKey = viewKey;
+
+  const banner = !runtime
+    ? '<div class="banner warning">⚠︎ Preview mode — changes are saved only in this browser. Open the published app for team-wide saving.</div>'
+    : (readOnly ? '<div class="banner warning">⚠︎ You have view-only access, so changes can\'t be saved. Ask the owner to share edit access.</div>' : "");
+
+  app.innerHTML =
+    renderTopbar(me) +
+    '<div class="container' + (entered ? " enter" : "") + '">' + banner +
+    (me.admin ? renderAdmin(me) : renderWorker(me)) +
+    "</div>" +
+    (pickerCtx ? renderPicker() : "");
+
+  const note = document.getElementById("worker-note");
+  if (note) note.addEventListener("keydown", e => e.stopPropagation());
+}
+
+function renderSignin() {
+  return '<div class="signin-wrap"><div class="signin-card">' +
+    '<div class="signin-logo">S</div>' +
+    "<h1>Shiftly</h1>" +
+    "<p>" + esc(state.settings.company) + " · shift scheduling</p>" +
+    '<form onsubmit="return onSignin(event)">' +
+      '<label for="si-email">Email</label>' +
+      '<input id="si-email" type="email" required placeholder="you@company.com" autocomplete="email" value="' + esc(ui.email || "") + '">' +
+      (signinAskName
+        ? '<label for="si-name">Your name</label>' +
+          '<input id="si-name" type="text" required placeholder="First and last name">' +
+          '<p class="signin-err">We don\'t know this email yet — enter your name to join the team.</p>' +
+          '<button class="btn" type="submit">Join &amp; sign in</button>'
+        : '<button class="btn" type="submit">Sign in</button>') +
+    "</form>" +
+    '<p class="signin-foot">Workers submit availability · managers build the schedule</p>' +
+  "</div></div>";
+}
+
+function onSignin(ev) {
+  ev.preventDefault();
+  const email = document.getElementById("si-email").value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    toast("Enter a full email address, e.g. name@company.com");
+    return false;
+  }
+  if (signinAskName) {
+    const name = document.getElementById("si-name").value.trim();
+    if (name) { signinAskName = false; registerWorker(name, email); }
+    return false;
+  }
+  if (!signIn(email)) { signinAskName = true; ui.email = email; render(); }
+  return false;
+}
+
+function renderTopbar(me) {
+  return '<div class="topbar"><div class="topbar-inner">' +
+    '<span class="brand"><span class="brand-mark">S</span>Shiftly</span>' +
+    '<span class="pill neutral">' + esc(state.settings.company) + "</span>" +
+    '<span class="spacer"></span>' +
+    '<span class="savestate" id="savestate"></span>' +
+    '<span class="userbox">' +
+      '<span class="avatar">' + esc(initials(me.name)) + "</span>" +
+      "<span>" + esc(me.name) + (me.admin ? " · Admin" : "") + "</span>" +
+      '<button class="signout" onclick="signOut()">Sign out</button>' +
+    "</span>" +
+  "</div></div>";
+}
+
+function renderWeeknav() {
+  return '<div class="weeknav">' +
+    '<button class="icon-btn" aria-label="Previous week" onclick="chgWeek(-1)">‹</button>' +
+    '<span class="wk-label">' + weekLabel(ui.week) + "</span>" +
+    '<button class="icon-btn" aria-label="Next week" onclick="chgWeek(1)">›</button>' +
+  "</div>";
+}
+function chgWeek(d) { ui.week = shiftWeek(ui.week, d); saveSession(); render(); }
+function setTab(t) { ui.tab = t; saveSession(); render(); }
+
+/* ===================== WORKER ===================== */
+function renderWorker(me) {
+  const tabs = [["submit","Submit availability"],["mysched","Schedule"]];
+  if (!tabs.some(t => t[0] === ui.tab)) ui.tab = "submit";
+  let html =
+    '<div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">' +
+      '<div><h1 class="page-title">Hi, ' + esc(me.name.split(" ")[0]) + '</h1>' +
+      '<p class="page-sub">Week of ' + weekLabel(ui.week) + "</p></div>" +
+      renderWeeknav() +
+    "</div>" +
+    '<div class="seg">' + tabs.map(t =>
+      '<button class="' + (ui.tab === t[0] ? "on" : "") + '" onclick="setTab(\'' + t[0] + '\')">' + t[1] + "</button>"
+    ).join("") + "</div>";
+  html += ui.tab === "submit" ? renderWorkerSubmit(me) : renderWorkerSchedule(me);
+  return html;
+}
+
+function renderWorkerSubmit(me) {
+  const wk = getWeek(ui.week);
+  const sub = wk.submissions[me.id] || { cells:{}, note:"", submittedAt:null };
+  const shifts = state.settings.shifts;
+
+  let grid = '<div class="avail-grid">';
+  for (let d = 0; d < 7; d++) {
+    const date = dayDate(ui.week, d);
+    grid += '<div class="day-row"><div><span class="day-name">' + DAY_NAMES[d] + '</span><br>' +
+      '<span class="day-date">' + fmtShort(date) + "</span></div>" +
+      '<div class="shift-cells">' +
+      shifts.map(sh => {
+        const st = sub.cells[d + "." + sh.id];
+        const label = st === "yes" ? "Available" : st === "pref" ? "★ Preferred" : st === "no" ? "Can't work" : "Tap to set";
+        return '<button class="cell ' + (st || "") + '" onclick="cycleCell(' + d + ',\'' + sh.id + '\')" ' +
+          'aria-label="' + DAY_NAMES[d] + " " + esc(sh.name) + ": " + label + '">' +
+          '<span class="c-name">' + esc(sh.name) + '</span>' +
+          '<span class="c-state">' + label + "</span></button>";
+      }).join("") +
+      "</div></div>";
+  }
+  grid += "</div>";
+
+  const lockedBanner = wk.locked
+    ? '<div class="banner info">🔒 Submissions for this week are closed. Contact your manager to make changes.</div>' : "";
+  const submittedPill = sub.submittedAt
+    ? '<span class="pill good">✓ Submitted ' + new Date(sub.submittedAt).toLocaleDateString("en-GB",{day:"numeric",month:"short"}) + "</span>"
+    : '<span class="pill warn">Not submitted yet</span>';
+
+  return '<div class="card">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
+      "<div><h3>Your availability</h3>" +
+      '<p class="sub" style="margin:0">Tap a shift to cycle: available → preferred → can\'t work → clear</p></div>' +
+      submittedPill +
+    "</div>" +
+    lockedBanner + grid +
+    '<div class="legend">' +
+      '<span><span class="dot d-yes"></span>Available</span>' +
+      '<span><span class="dot d-pref"></span>Preferred</span>' +
+      '<span><span class="dot d-no"></span>Can\'t work</span>' +
+      '<span><span class="dot d-unset"></span>Not set</span>' +
+    "</div>" +
+    '<div style="margin-top:16px"><label style="font-size:12px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em">Note to your manager (optional)</label>' +
+    '<textarea id="worker-note" rows="2" style="margin-top:6px" placeholder="e.g. I can cover extra shifts this week"' + (wk.locked ? " disabled" : "") + ">" + esc(sub.note || "") + "</textarea></div>" +
+    '<div class="submit-bar">' +
+      '<button class="btn" onclick="submitAvailability()"' + (wk.locked ? " disabled" : "") + ">" + (sub.submittedAt ? "Update submission" : "Submit availability") + "</button>" +
+      '<span class="submit-note">Your manager sees your submission the moment you send it.</span>' +
+    "</div></div>";
+}
+
+function renderWorkerSchedule(me) {
+  const wk = getWeek(ui.week);
+  if (!wk.published) {
+    return '<div class="card" style="text-align:center;padding:44px 20px">' +
+      '<div style="font-size:34px;margin-bottom:8px">🗓️</div>' +
+      "<h3>Schedule not published yet</h3>" +
+      '<p class="sub" style="margin:4px 0 0">Your manager is still working on this week. Use the ‹ › arrows above to check another week.</p></div>';
+  }
+  let rows = "";
+  let myShifts = 0;
+  for (let d = 0; d < 7; d++) {
+    const date = dayDate(ui.week, d);
+    const mine = state.settings.shifts.filter(sh => (wk.assignments[d + "." + sh.id] || []).includes(me.id));
+    myShifts += mine.length;
+    rows += '<div class="mysched-row"><div class="d">' + DAY_SHORT[d] + "<small>" + fmtShort(date) + "</small></div>" +
+      (mine.length
+        ? mine.map(sh => '<span class="shift-badge"><b>' + esc(sh.name) + "</b><small>" + sh.start + "–" + sh.end + "</small></span>").join("")
+        : '<span class="off">Day off</span>') +
+      "</div>";
+  }
+
+  /* full team schedule for the week — everyone can see who works when */
+  let teamDays = "";
+  for (let d = 0; d < 7; d++) {
+    const date = dayDate(ui.week, d);
+    let shiftRows = "";
+    for (const sh of state.settings.shifts) {
+      const list = wk.assignments[d + "." + sh.id] || [];
+      if (!list.length) continue;
+      shiftRows += '<div class="team-shift-row">' +
+        '<span class="ts-name">' + esc(sh.name) + " <small>" + sh.start + "–" + sh.end + "</small></span>" +
+        '<span class="ts-people">' + list.map(id => {
+          const emp = empById(id); if (!emp) return "";
+          return '<span class="ts-chip' + (id === me.id ? " me" : "") + '">' + esc(emp.name) + "</span>";
+        }).join("") + "</span></div>";
+    }
+    teamDays += '<div class="team-day"><div class="td-head">' + DAY_NAMES[d] + " <small>" + fmtShort(date) + "</small></div>" +
+      (shiftRows || '<div class="off" style="padding:2px 0 6px">No shifts scheduled</div>') + "</div>";
+  }
+
+  return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">' +
+    "<h3>Your shifts this week</h3>" +
+    '<span class="pill accent">' + myShifts + " shift" + (myShifts === 1 ? "" : "s") + "</span></div>" +
+    '<div class="mysched">' + rows + "</div></div>" +
+    '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+    "<div><h3>Full team schedule</h3>" +
+    '<p class="sub">Everyone\'s shifts for the week of ' + weekLabel(ui.week) + " — you're highlighted in blue.</p></div>" +
+    '<span class="pill good">Published</span></div>' +
+    teamDays + "</div>";
+}
+
+/* ===================== ADMIN ===================== */
+function renderAdmin(me) {
+  const tabs = [["availability","Availability"],["schedule","Schedule"],["team","Team"],["settings","Settings"]];
+  if (!tabs.some(t => t[0] === ui.tab)) ui.tab = "availability";
+  let html =
+    '<div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">' +
+      '<div><h1 class="page-title">Dashboard</h1>' +
+      '<p class="page-sub">Week of ' + weekLabel(ui.week) + "</p></div>" +
+      renderWeeknav() +
+    "</div>" +
+    '<div class="seg">' + tabs.map(t =>
+      '<button class="' + (ui.tab === t[0] ? "on" : "") + '" onclick="setTab(\'' + t[0] + '\')">' + t[1] + "</button>"
+    ).join("") + "</div>";
+  if (ui.tab === "availability") html += renderAdminAvailability();
+  else if (ui.tab === "schedule") html += renderAdminSchedule();
+  else if (ui.tab === "team") html += renderAdminTeam();
+  else html += renderAdminSettings();
+  return html;
+}
+
+function renderAdminAvailability() {
+  const wk = getWeek(ui.week);
+  const workers = state.employees.filter(e => !e.admin);
+  const submitted = workers.filter(w => wk.submissions[w.id] && wk.submissions[w.id].submittedAt);
+  const shifts = state.settings.shifts;
+
+  let stats =
+    '<div class="stat-cards">' +
+      '<div class="stat"><div class="v">' + submitted.length + " / " + workers.length + '</div><div class="k">Workers submitted</div></div>' +
+      '<div class="stat"><div class="v">' + (wk.published ? "Live" : "Draft") + '</div><div class="k">Schedule status</div></div>' +
+      '<div class="stat"><div class="v">' + (wk.locked ? "Closed" : "Open") + '</div><div class="k">Submissions</div></div>' +
+    "</div>";
+
+  let head = "<tr><th>Worker</th>" +
+    Array.from({length:7}, (_, d) => "<th>" + DAY_SHORT[d] + "<small>" + fmtShort(dayDate(ui.week, d)) + "</small></th>").join("") +
+    "</tr>";
+
+  let body = workers.map(w => {
+    const sub = wk.submissions[w.id];
+    const status = sub && sub.submittedAt
+      ? '<span class="pill good" style="font-size:10px;padding:2px 8px">✓</span>'
+      : '<span class="pill neutral" style="font-size:10px;padding:2px 8px">–</span>';
+    let cells = "";
+    for (let d = 0; d < 7; d++) {
+      cells += '<td><div class="mini-cells">' + shifts.map(sh => {
+        const st = sub ? sub.cells[d + "." + sh.id] : undefined;
+        return '<span class="mini ' + (st || "") + '" title="' + esc(sh.name) + '">' + esc(sh.name[0]) + "</span>";
+      }).join("") + "</div></td>";
+    }
+    const note = sub && sub.note ? '<div class="st" title="' + esc(sub.note) + '">💬 ' + esc(sub.note.length > 34 ? sub.note.slice(0,34) + "…" : sub.note) + "</div>" : "";
+    return "<tr><td><div class=\"emp-cell\">" +
+      '<span class="avatar" style="width:26px;height:26px;font-size:10px">' + esc(initials(w.name)) + "</span>" +
+      '<div><div class="nm">' + esc(w.name) + " " + status + "</div>" + note + "</div></div></td>" + cells + "</tr>";
+  }).join("");
+
+  if (!workers.length) body = '<tr><td colspan="8" style="color:var(--text-2)">No workers yet — add your team in the Team tab.</td></tr>';
+
+  return stats +
+    '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+      "<div><h3>Availability submissions</h3>" +
+      '<p class="sub">Each cell shows ' + shifts.map(s => esc(s.name[0]) + " = " + esc(s.name)).join(", ") + "</p></div>" +
+      '<button class="btn secondary small" onclick="toggleLock()">' + (wk.locked ? "Reopen submissions" : "Close submissions") + "</button>" +
+    "</div>" +
+    '<div class="matrix-wrap"><table class="matrix"><thead>' + head + "</thead><tbody>" + body + "</tbody></table></div>" +
+    '<div class="legend">' +
+      '<span><span class="dot d-yes"></span>Available</span>' +
+      '<span><span class="dot d-pref"></span>Preferred</span>' +
+      '<span><span class="dot d-no"></span>Can\'t work</span>' +
+      '<span><span class="dot d-unset"></span>No response</span>' +
+    "</div></div>";
+}
+
+function renderAdminSchedule() {
+  const wk = getWeek(ui.week);
+  const shifts = state.settings.shifts;
+  let totalAssigned = 0, totalNeeded = 0;
+
+  let days = "";
+  for (let d = 0; d < 7; d++) {
+    const date = dayDate(ui.week, d);
+    let rows = "";
+    for (const sh of shifts) {
+      const key = d + "." + sh.id;
+      const need = state.settings.required[sh.id] || 0;
+      const list = wk.assignments[key] || [];
+      totalAssigned += list.length; totalNeeded += need;
+      const busy = {};
+      shifts.forEach(s2 => (wk.assignments[d + "." + s2.id] || []).forEach(id => busy[id] = (busy[id]||0)+1));
+      const chips = list.map(id => {
+        const emp = empById(id); if (!emp) return "";
+        const av = (wk.submissions[id] || {cells:{}}).cells[key];
+        const problem = av === "no" ? "Marked can't work" : (!av ? "No response" : (busy[id] > 1 ? "Double-booked today" : null));
+        return '<span class="chip' + (problem ? " warnchip" : "") + '"' + (problem ? ' title="' + esc(problem) + '"' : "") + ">" +
+          (problem ? "⚠︎ " : (av === "pref" ? "★ " : "")) + esc(emp.name) +
+          '<button class="x" aria-label="Remove ' + esc(emp.name) + '" onclick="toggleAssign(' + d + ',\'' + sh.id + '\',\'' + id + '\')">✕</button></span>';
+      }).join("");
+      const countCls = list.length >= need ? "good" : (list.length ? "warn" : "neutral");
+      rows += '<div class="shift-row">' +
+        '<div class="s-label"><b>' + esc(sh.name) + "</b><small>" + sh.start + "–" + sh.end + "</small></div>" +
+        '<span class="pill ' + countCls + ' count">' + list.length + " / " + need + "</span>" +
+        '<div class="assigned">' + chips +
+          '<button class="addbtn" onclick="openPicker(' + d + ',\'' + sh.id + '\')">+ Assign</button>' +
+        "</div></div>";
+    }
+    days += '<div class="sched-day"><div class="sched-day-head"><h4>' + DAY_NAMES[d] + "</h4><small>" + fmtShort(date) + "</small></div>" + rows + "</div>";
+  }
+
+  const coverage = totalNeeded ? Math.round(100 * Math.min(totalAssigned, totalNeeded) / totalNeeded) : 0;
+
+  return '<div class="stat-cards">' +
+      '<div class="stat"><div class="v">' + coverage + '%</div><div class="k">Coverage vs. required</div></div>' +
+      '<div class="stat"><div class="v">' + totalAssigned + '</div><div class="k">Shifts assigned</div></div>' +
+      '<div class="stat"><div class="v">' + (wk.published ? "Live" : "Draft") + '</div><div class="k">Schedule status</div></div>' +
+    "</div>" +
+    '<div class="card">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">' +
+      "<div><h3>Build the schedule</h3>" +
+      '<p class="sub" style="margin:0">Auto-fill respects availability and balances shifts; ★ marks preferred, ⚠︎ marks conflicts.</p></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="btn secondary small" onclick="autoFill()">✦ Auto-fill</button>' +
+        '<button class="btn secondary small" onclick="exportCsv()">Export CSV</button>' +
+        '<button class="btn danger small" onclick="clearWeek()">Clear</button>' +
+        '<button class="btn small" onclick="publishSchedule()">' + (wk.published ? "Unpublish" : "Publish schedule") + "</button>" +
+      "</div>" +
+    "</div>" + days + "</div>";
+}
+
+function openPicker(dayIdx, shiftId) { pickerCtx = { dayIdx, shiftId }; render(); }
+function closePicker() { pickerCtx = null; render(); }
+
+function renderPicker() {
+  const { dayIdx, shiftId } = pickerCtx;
+  const wk = getWeek(ui.week);
+  const sh = state.settings.shifts.find(s => s.id === shiftId);
+  const key = dayIdx + "." + shiftId;
+  const assigned = new Set(wk.assignments[key] || []);
+  const busy = new Set();
+  state.settings.shifts.forEach(s2 => (wk.assignments[dayIdx + "." + s2.id] || []).forEach(id => busy.add(id)));
+
+  const groups = { pref: [], yes: [], unset: [], no: [] };
+  state.employees.filter(e => !assigned.has(e.id)).forEach(e => {
+    const av = (wk.submissions[e.id] || {cells:{}}).cells[key];
+    groups[av === "pref" ? "pref" : av === "yes" ? "yes" : av === "no" ? "no" : "unset"].push(e);
+  });
+
+  const totals = {};
+  Object.values(wk.assignments).forEach(l => l.forEach(id => totals[id] = (totals[id]||0)+1));
+
+  function rows(list) {
+    return list.map(e =>
+      '<button class="pick-row" onclick="toggleAssign(' + dayIdx + ',\'' + shiftId + '\',\'' + e.id + '\')">' +
+        '<span class="avatar" style="width:26px;height:26px;font-size:10px">' + esc(initials(e.name)) + "</span>" +
+        '<span class="nm">' + esc(e.name) + (busy.has(e.id) ? ' <span class="pill warn" style="font-size:10px;padding:1px 7px">on shift today</span>' : "") + "</span>" +
+        '<span class="meta">' + (totals[e.id] || 0) + " this week</span>" +
+      "</button>"
+    ).join("");
+  }
+  const sections = [
+    ["pref", "★ Preferred"], ["yes", "Available"], ["unset", "No response"], ["no", "Marked can't work"]
+  ].filter(([k]) => groups[k].length).map(([k, label]) =>
+    '<div class="pick-group g-' + k + '"><div class="g-label">' + label + "</div>" + rows(groups[k]) + "</div>"
+  ).join("") || '<p class="sub">Everyone is already assigned to this shift.</p>';
+
+  return '<div class="overlay" onclick="if(event.target===this)closePicker()"><div class="picker" role="dialog" aria-modal="true">' +
+    "<h4>Assign — " + esc(sh.name) + "</h4>" +
+    '<p class="sub">' + DAY_NAMES[dayIdx] + " " + fmtShort(dayDate(ui.week, dayIdx)) + " · " + sh.start + "–" + sh.end + "</p>" +
+    sections +
+    '<button class="btn secondary picker-close" onclick="closePicker()">Done</button>' +
+  "</div></div>";
+}
+
+function renderAdminTeam() {
+  const rows = state.employees.map(e =>
+    '<div class="team-row">' +
+      '<span class="avatar">' + esc(initials(e.name)) + "</span>" +
+      '<div class="info"><b>' + esc(e.name) + (e.admin ? ' <span class="pill accent" style="font-size:10px;padding:2px 8px">Admin</span>' : "") + "</b>" +
+      "<small>" + esc(e.email) + "</small></div>" +
+      '<button class="btn secondary small" onclick="toggleAdmin(\'' + e.id + '\')">' + (e.admin ? "Make worker" : "Make admin") + "</button>" +
+      '<button class="btn danger small" onclick="removeEmployee(\'' + e.id + '\')">Remove</button>' +
+    "</div>"
+  ).join("");
+  return '<div class="card"><h3>Team</h3>' +
+    '<p class="sub">Workers sign in with their email — add them here, or they can join themselves from the sign-in screen.</p>' +
+    rows +
+    '<div class="team-add">' +
+      '<input id="add-name" placeholder="Full name" aria-label="New team member name">' +
+      '<input id="add-email" type="email" placeholder="email@company.com" aria-label="New team member email">' +
+      '<button class="btn" onclick="addEmployee(document.getElementById(\'add-name\').value, document.getElementById(\'add-email\').value)">Add</button>' +
+    "</div></div>";
+}
+
+function renderAdminSettings() {
+  const wk = getWeek(ui.week);
+  const shiftRows = state.settings.shifts.map(sh =>
+    '<div class="set-row">' +
+      '<div class="lbl"><b>' + esc(sh.name) + ' shift</b><small>Start / end time</small></div>' +
+      '<input type="time" value="' + sh.start + '" onchange="updateShiftTime(\'' + sh.id + '\',\'start\',this.value)" aria-label="' + esc(sh.name) + ' start">' +
+      '<input type="time" value="' + sh.end + '" onchange="updateShiftTime(\'' + sh.id + '\',\'end\',this.value)" aria-label="' + esc(sh.name) + ' end">' +
+    "</div>"
+  ).join("");
+  const reqRows = state.settings.shifts.map(sh =>
+    '<div class="set-row">' +
+      '<div class="lbl"><b>' + esc(sh.name) + '</b><small>Workers needed per day</small></div>' +
+      '<input type="number" min="0" max="20" value="' + (state.settings.required[sh.id] || 0) + '" onchange="updateRequired(\'' + sh.id + '\',this.value)" aria-label="Required for ' + esc(sh.name) + '">' +
+    "</div>"
+  ).join("");
+  return '<div class="card"><h3>Company</h3>' +
+      '<div class="set-row"><div class="lbl"><b>Company name</b><small>Shown on the sign-in screen</small></div>' +
+      '<input type="text" value="' + esc(state.settings.company) + '" onchange="updateCompany(this.value)" aria-label="Company name"></div></div>' +
+    '<div class="card"><h3>Shift hours</h3><p class="sub">Applies to every week.</p>' + shiftRows + "</div>" +
+    '<div class="card"><h3>Staffing requirements</h3><p class="sub">The schedule builder and auto-fill aim for these numbers.</p>' + reqRows + "</div>" +
+    '<div class="card"><h3>This week (' + weekLabel(ui.week) + ")</h3>" +
+      '<div class="set-row"><div class="lbl"><b>Accept submissions</b><small>Turn off to close availability changes for this week</small></div>' +
+      '<button class="toggle ' + (wk.locked ? "" : "on") + '" role="switch" aria-checked="' + (!wk.locked) + '" aria-label="Accept submissions" onclick="toggleLock()"><span class="knob"></span></button></div>' +
+      '<div class="set-row"><div class="lbl"><b>Schedule published</b><small>Workers can see their assigned shifts</small></div>' +
+      '<button class="toggle ' + (wk.published ? "on" : "") + '" role="switch" aria-checked="' + (!!wk.published) + '" aria-label="Schedule published" onclick="publishSchedule()"><span class="knob"></span></button></div>' +
+    "</div>";
+}
+
+/* ---------- boot ---------- */
+(async function boot() {
+  render();
+  try {
+    if (window.claude && typeof window.claude.use === "function") {
+      const [art, dl] = await Promise.all([claude.use("artifact"), claude.use("downloads")]);
+      runtime = art; downloadsCap = dl;
+    }
+  } catch (e) { runtime = null; }
+  if (!runtime) {
+    /* demo mode: restore locally saved state so the preview still behaves like an app */
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_STATE));
+      if (saved && saved.employees && saved.weeks) state = saved;
+    } catch(e){}
+  }
+  render();
+})();
+</script>
