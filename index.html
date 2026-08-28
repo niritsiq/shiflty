@@ -1,4 +1,6 @@
 <title>Shiftly</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 <style>
   /* ---------- Design tokens : Apple-style ---------- */
@@ -80,6 +82,7 @@
 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
+  html { -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
   body {
     background: var(--bg);
     color: var(--text);
@@ -285,7 +288,7 @@
   .ts-chip.me { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
   /* ---------- Admin: availability matrix ---------- */
-  .matrix-wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+  .matrix-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; padding: 0 4px; }
   table.matrix { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 760px; }
   .matrix th {
     text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
@@ -456,8 +459,50 @@
     .day-row { grid-template-columns: 1fr; gap: 8px; }
     .shift-row .s-label { width: 100%; }
     .team-add { grid-template-columns: 1fr; }
-    .weeknav .wk-label { min-width: 120px; font-size: 13px; }
+    .weeknav .wk-label { min-width: 108px; font-size: 13px; }
     .page-title { font-size: 24px; }
+
+    /* phone ergonomics */
+    input, select, textarea { font-size: 16px; }       /* stops iOS zoom-on-focus */
+    .container { padding: 18px 14px calc(80px + env(safe-area-inset-bottom)); }
+    .card { padding: 16px 14px; border-radius: 16px; }
+    .topbar-inner { padding: 8px 14px; gap: 10px; }
+    .topbar .pill.neutral { display: none; }            /* company chip: reclaim space */
+    .userbox .uname { max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .icon-btn { width: 40px; height: 40px; }            /* 40px+ touch targets */
+    .seg button { padding: 9px 15px; }
+    .cell { padding: 12px 6px; }
+    .chip { padding: 6px 8px 6px 13px; }
+    .chip .x { width: 24px; height: 24px; font-size: 12px; }
+    .addbtn { padding: 7px 15px; }
+    .pick-row { padding: 12px 10px; }
+    .mysched-row .d { width: 84px; }
+    .ts-name { width: 104px; }
+    .stat-cards { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; }
+    .stat { padding: 12px 14px; }
+    .stat .v { font-size: 21px; }
+
+    /* submit bar sticks to the bottom of the screen while the grid scrolls */
+    .submit-bar {
+      position: sticky; bottom: 0; z-index: 40;
+      margin: 18px -14px -16px;
+      padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+      background: var(--bar);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      backdrop-filter: saturate(180%) blur(20px);
+      border-top: 1px solid var(--sep);
+      border-radius: 0 0 16px 16px;
+    }
+    .submit-bar .btn { flex: 1; }
+    .submit-note { display: none; }
+
+    /* picker becomes an iOS-style bottom sheet */
+    .overlay { align-items: flex-end; padding: 0; }
+    .picker {
+      max-width: 100%; max-height: 82vh;
+      border-radius: 22px 22px 0 0;
+      padding-bottom: calc(22px + env(safe-area-inset-bottom));
+    }
   }
 </style>
 
@@ -886,7 +931,7 @@ function renderTopbar(me) {
     '<span class="savestate" id="savestate"></span>' +
     '<span class="userbox">' +
       '<span class="avatar">' + esc(initials(me.name)) + "</span>" +
-      "<span>" + esc(me.name) + (me.admin ? " · Admin" : "") + "</span>" +
+      '<span class="uname">' + esc(me.name) + (me.admin ? " · Admin" : "") + "</span>" +
       '<button class="signout" onclick="signOut()">Sign out</button>' +
     "</span>" +
   "</div></div>";
