@@ -221,6 +221,12 @@
   .signin-card label { font-size: 12px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: -6px; }
   .signin-err { color: var(--bad); font-size: 13px; margin: 4px 0 0; }
   .signin-foot { margin-top: 20px; font-size: 12px; color: var(--text-3); }
+  .secret-box {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--card-2); border-radius: 10px; padding: 10px 12px;
+    font-size: 14px; letter-spacing: 1px; text-align: center;
+    user-select: all; -webkit-user-select: all; word-break: break-all; margin-bottom: 12px;
+  }
 
   /* ---------- Worker availability grid ---------- */
   .avail-grid { display: flex; flex-direction: column; gap: 10px; }
@@ -508,70 +514,322 @@
 
 <script id="state" type="application/json">
 {
-  "settings": {
-    "company": "Cybereason",
-    "shifts": [
-      { "id": "morning", "name": "Morning", "start": "07:00", "end": "15:00" },
-      { "id": "evening", "name": "Evening", "start": "14:30", "end": "23:00" },
-      { "id": "night",   "name": "Night",   "start": "23:00", "end": "07:00" }
-    ],
-    "required": { "morning": 2, "evening": 2, "night": 2 }
-  },
-  "employees": [
-    { "id": "e1", "name": "Nirit", "email": "niritzik23@gmail.com", "admin": true, "position": "Manager" },
-    { "id": "e2", "name": "Daniel Cohen", "email": "daniel@example.com", "admin": false, "position": "Shift worker" },
-    { "id": "e3", "name": "Maya Levi", "email": "maya@example.com", "admin": false, "position": "Shift worker" },
-    { "id": "e4", "name": "Tom Peretz", "email": "tom@example.com", "admin": false, "position": "Shift worker" },
-    { "id": "e5", "name": "Sara Mizrahi", "email": "sara@example.com", "admin": false, "position": "Shift worker" },
-    { "id": "evwqlve", "name": "nir cyber", "email": "nir@cyberreason.com", "admin": false, "position": "Shift worker" },
-    { "id": "e0oi2hu", "name": "nir cyber", "email": "nir.itzik@cybereason", "admin": false, "position": "Shift worker" },
-    { "id": "ey4fxpf", "name": "nir cyber", "email": "nir.itzik@cybereason.com", "admin": false, "position": "Shift worker" },
-    { "id": "elp44dc", "name": "nir123", "email": "nir.itzik@cybereason.com", "admin": false, "position": "Shift worker" }
+ "settings": {
+  "company": "Cybereason",
+  "shifts": [
+   {
+    "id": "morning",
+    "name": "Morning",
+    "start": "07:00",
+    "end": "15:00"
+   },
+   {
+    "id": "evening",
+    "name": "Evening",
+    "start": "14:30",
+    "end": "23:00"
+   },
+   {
+    "id": "night",
+    "name": "Night",
+    "start": "23:00",
+    "end": "07:00"
+   }
   ],
-  "weeks": {
-    "2026-08-30": {
-      "locked": true,
-      "published": true,
-      "assignments": {
-        "0.morning": ["e3", "e2"], "0.evening": ["ey4fxpf", "e5"], "0.night": ["e4", "e1"],
-        "1.morning": ["e2", "e4"], "1.evening": ["e3", "evwqlve"], "1.night": ["ey4fxpf"],
-        "2.morning": ["evwqlve", "e4"], "2.evening": ["e2", "e3"], "2.night": ["ey4fxpf"],
-        "3.morning": ["e3", "ey4fxpf"], "3.evening": ["e2", "e0oi2hu"], "3.night": ["e4"],
-        "4.morning": ["e2"], "4.evening": ["evwqlve", "e3"], "4.night": ["e4"],
-        "5.morning": ["e2"], "5.evening": ["e4", "e0oi2hu"], "5.night": ["e3"],
-        "6.morning": ["e3"], "6.evening": ["evwqlve", "e4"], "6.night": ["e2", "e0oi2hu"]
-      },
-      "submissions": {
-        "e2": { "note": "", "submittedAt": "2026-08-27T09:12:00Z", "cells": {
-          "0.morning": "pref", "0.evening": "yes", "1.morning": "yes", "1.evening": "yes",
-          "2.evening": "pref", "2.night": "yes", "3.morning": "no", "3.evening": "yes",
-          "4.morning": "yes", "5.morning": "yes", "5.evening": "yes", "6.night": "yes" } },
-        "e3": { "note": "Studying Tuesdays — evenings only that day", "submittedAt": "2026-08-27T14:40:00Z", "cells": {
-          "0.morning": "yes", "0.night": "yes", "1.evening": "pref", "1.night": "yes",
-          "2.evening": "yes", "3.morning": "yes", "3.evening": "pref", "4.evening": "yes",
-          "5.night": "yes", "6.morning": "yes", "6.evening": "yes" } },
-        "e4": { "note": "", "submittedAt": "2026-08-28T08:05:00Z", "cells": {
-          "0.evening": "yes", "0.night": "pref", "1.morning": "yes", "1.night": "yes",
-          "2.morning": "yes", "2.night": "pref", "3.night": "yes", "4.morning": "no",
-          "4.night": "yes", "5.evening": "yes", "6.evening": "yes", "6.night": "pref" } },
-        "evwqlve": { "note": "", "submittedAt": "2026-08-28T11:09:27.286Z", "cells": {
-          "0.morning": "yes", "1.evening": "yes", "2.morning": "yes",
-          "4.evening": "yes", "6.evening": "yes" } },
-        "e0oi2hu": { "note": "", "submittedAt": "2026-08-28T11:12:04.097Z", "cells": {
-          "0.morning": "yes", "1.evening": "yes", "2.evening": "yes", "3.evening": "yes",
-          "4.evening": "yes", "5.evening": "yes", "6.evening": "yes", "6.night": "yes" } },
-        "ey4fxpf": { "note": "", "submittedAt": "2026-08-28T12:59:33.404Z", "cells": {
-          "0.morning": "yes", "0.evening": "yes", "0.night": "yes",
-          "1.morning": "yes", "1.evening": "yes", "1.night": "yes",
-          "2.morning": "yes", "2.evening": "yes", "2.night": "yes",
-          "3.morning": "yes", "3.evening": "yes", "3.night": "yes" } }
-      }
-    },
-    "2026-08-16": { "locked": false, "published": false, "assignments": {}, "submissions": {} },
-    "2026-08-23": { "locked": false, "published": false, "assignments": {}, "submissions": {
-      "ey4fxpf": { "cells": {}, "note": "", "submittedAt": null } } },
-    "2026-09-06": { "locked": false, "published": false, "assignments": {}, "submissions": {} }
+  "required": {
+   "morning": 2,
+   "evening": 2,
+   "night": 2
   }
+ },
+ "employees": [
+  {
+   "id": "e1",
+   "name": "Nirit",
+   "email": "niritzik23@gmail.com",
+   "admin": true,
+   "position": "Manager"
+  },
+  {
+   "id": "e3",
+   "name": "Maya Levi",
+   "email": "maya@example.com",
+   "admin": false,
+   "position": "Shift worker"
+  },
+  {
+   "id": "e4",
+   "name": "Tom Peretz",
+   "email": "tom@example.com",
+   "admin": false,
+   "position": "Shift worker"
+  },
+  {
+   "id": "evwqlve",
+   "name": "nir cyber",
+   "email": "nir@cyberreason.com",
+   "admin": false,
+   "position": "Shift worker"
+  },
+  {
+   "id": "e0oi2hu",
+   "name": "nir cyber",
+   "email": "nir.itzik@cybereason",
+   "admin": false,
+   "position": "Shift worker"
+  },
+  {
+   "id": "ey4fxpf",
+   "name": "nir cyber",
+   "email": "nir.itzik@cybereason.com",
+   "admin": false,
+   "position": "Shift worker"
+  },
+  {
+   "id": "elp44dc",
+   "name": "nir123",
+   "email": "nir.itzik@cybereason.com",
+   "admin": false,
+   "position": "Shift worker"
+  },
+  {
+   "id": "elywycu",
+   "name": "Lidor cohen",
+   "email": "lidor.cohen@cybereason.com",
+   "admin": false,
+   "position": "Shift worker"
+  },
+  {
+   "id": "e3t7yvn",
+   "name": "Lidor",
+   "email": "lidor.cohen@levelblue.com",
+   "admin": false,
+   "position": "Shift worker"
+  },
+  {
+   "id": "e0ocsf9",
+   "name": "sdfdsfds",
+   "email": "oopmdsfsd@fsdofds.com",
+   "admin": false,
+   "position": "Shift worker"
+  }
+ ],
+ "weeks": {
+  "2026-08-30": {
+   "locked": false,
+   "published": true,
+   "assignments": {
+    "0.morning": [
+     "e3",
+     "evwqlve"
+    ],
+    "0.evening": [
+     "ey4fxpf"
+    ],
+    "0.night": [
+     "e4",
+     "elywycu"
+    ],
+    "1.morning": [
+     "e4"
+    ],
+    "1.evening": [
+     "e3",
+     "evwqlve"
+    ],
+    "1.night": [
+     "ey4fxpf"
+    ],
+    "2.morning": [
+     "evwqlve",
+     "e4"
+    ],
+    "2.evening": [
+     "e3",
+     "e0oi2hu"
+    ],
+    "2.night": [
+     "ey4fxpf"
+    ],
+    "3.morning": [
+     "e3",
+     "ey4fxpf"
+    ],
+    "3.evening": [
+     "e0oi2hu"
+    ],
+    "3.night": [
+     "e4"
+    ],
+    "4.evening": [
+     "evwqlve",
+     "e3"
+    ],
+    "4.night": [
+     "e4"
+    ],
+    "5.evening": [
+     "e4",
+     "e0oi2hu"
+    ],
+    "5.night": [
+     "e3"
+    ],
+    "6.morning": [
+     "e3"
+    ],
+    "6.evening": [
+     "evwqlve",
+     "e4"
+    ],
+    "6.night": [
+     "e0oi2hu"
+    ],
+    "5.morning": [
+     "elywycu",
+     "elp44dc"
+    ]
+   },
+   "submissions": {
+    "e3": {
+     "note": "Studying Tuesdays — evenings only that day",
+     "submittedAt": "2026-08-27T14:40:00Z",
+     "cells": {
+      "0.morning": "yes",
+      "0.night": "yes",
+      "1.evening": "pref",
+      "1.night": "yes",
+      "2.evening": "yes",
+      "3.morning": "yes",
+      "3.evening": "pref",
+      "4.evening": "yes",
+      "5.night": "yes",
+      "6.morning": "yes",
+      "6.evening": "yes"
+     }
+    },
+    "e4": {
+     "note": "",
+     "submittedAt": "2026-08-28T08:05:00Z",
+     "cells": {
+      "0.evening": "yes",
+      "0.night": "pref",
+      "1.morning": "yes",
+      "1.night": "yes",
+      "2.morning": "yes",
+      "2.night": "pref",
+      "3.night": "yes",
+      "4.morning": "no",
+      "4.night": "yes",
+      "5.evening": "yes",
+      "6.evening": "yes",
+      "6.night": "pref"
+     }
+    },
+    "evwqlve": {
+     "note": "",
+     "submittedAt": "2026-08-28T11:09:27.286Z",
+     "cells": {
+      "0.morning": "yes",
+      "1.evening": "yes",
+      "2.morning": "yes",
+      "4.evening": "yes",
+      "6.evening": "yes"
+     }
+    },
+    "e0oi2hu": {
+     "note": "",
+     "submittedAt": "2026-08-28T11:12:04.097Z",
+     "cells": {
+      "0.morning": "yes",
+      "1.evening": "yes",
+      "2.evening": "yes",
+      "3.evening": "yes",
+      "4.evening": "yes",
+      "5.evening": "yes",
+      "6.evening": "yes",
+      "6.night": "yes"
+     }
+    },
+    "ey4fxpf": {
+     "note": "",
+     "submittedAt": "2026-08-28T12:59:33.404Z",
+     "cells": {
+      "0.morning": "yes",
+      "0.evening": "yes",
+      "0.night": "yes",
+      "1.morning": "yes",
+      "1.evening": "yes",
+      "1.night": "yes",
+      "2.morning": "yes",
+      "2.evening": "yes",
+      "2.night": "yes",
+      "3.morning": "yes",
+      "3.evening": "yes",
+      "3.night": "yes"
+     }
+    },
+    "elywycu": {
+     "cells": {
+      "5.morning": "yes"
+     },
+     "note": "",
+     "submittedAt": "2026-08-29T16:22:05.885Z"
+    }
+   }
+  },
+  "2026-08-16": {
+   "locked": false,
+   "published": false,
+   "assignments": {},
+   "submissions": {}
+  },
+  "2026-08-23": {
+   "locked": false,
+   "published": false,
+   "assignments": {},
+   "submissions": {
+    "ey4fxpf": {
+     "cells": {},
+     "note": "",
+     "submittedAt": null
+    }
+   }
+  },
+  "2026-09-06": {
+   "locked": false,
+   "published": false,
+   "assignments": {},
+   "submissions": {
+    "ey4fxpf": {
+     "cells": {
+      "1.morning": "yes",
+      "2.morning": "yes",
+      "3.morning": "yes",
+      "4.morning": "yes"
+     },
+     "note": "All morning",
+     "submittedAt": "2026-08-28T14:17:05.135Z"
+    },
+    "e3t7yvn": {
+     "cells": {},
+     "note": "",
+     "submittedAt": null
+    },
+    "elywycu": {
+     "cells": {
+      "4.morning": "yes",
+      "3.evening": "yes",
+      "2.morning": "yes",
+      "3.morning": "pref",
+      "0.night": "yes"
+     },
+     "note": "",
+     "submittedAt": "2026-08-30T08:35:56.532Z"
+    }
+   }
+  }
+ }
 }
 </script>
 
@@ -591,6 +849,10 @@ let downloadsCap = null;
 let readOnly = false;        // set true after a not_writer / not_granted rejection
 let serverMode = false;      // true when a /api/state sync server is behind this page
 let serverVersion = 0;
+let authToken = null;        // server-mode session token (authenticator-app sign-in)
+let signinStep = null;       // server-mode 2FA step: {mode:"code"|"enroll", email, secret, otpauth}
+let pollStarted = false;
+const LS_TOKEN = "shiftly.token";
 
 const LS_SESSION = "shiftly.session";
 const LS_STATE = "shiftly.demo.state";
@@ -662,24 +924,48 @@ function scheduleSave(immediate) {
 }
 
 /* ---------- server sync (Railway or any host running server.js) ---------- */
+function authHeaders() { return authToken ? { "Authorization": "Bearer " + authToken } : {}; }
+
+function adoptServerState(data) {
+  state = data.state;
+  serverVersion = data.version || 0;
+  serverMode = true;
+  if (!pollStarted) { pollStarted = true; setInterval(pollServer, 15000); }
+}
+
+function forceSignout(msg) {
+  authToken = null;
+  try { localStorage.removeItem(LS_TOKEN); } catch (e) {}
+  ui.email = null; signinStep = null; saveSession();
+  if (msg) toast(msg);
+  render();
+}
+
 async function initServerSync() {
+  try { authToken = localStorage.getItem(LS_TOKEN); } catch (e) {}
   try {
-    const r = await fetch("api/state", { cache: "no-store" });
+    const r = await fetch("api/state", { cache: "no-store", headers: authHeaders() });
+    if (r.status === 401) {
+      /* a sync server is here but wants authenticator sign-in */
+      serverMode = true;
+      authToken = null;
+      try { localStorage.removeItem(LS_TOKEN); } catch (e) {}
+      ui.email = null; saveSession();
+      return true;
+    }
     if (!r.ok) return false;
     const data = await r.json();
     if (!data || !data.state || !Array.isArray(data.state.employees)) return false;
-    state = data.state;
-    serverVersion = data.version || 0;
-    serverMode = true;
-    setInterval(pollServer, 15000);
+    adoptServerState(data);
     return true;
   } catch (e) { return false; }
 }
 
 async function pollServer() {
-  if (document.hidden || saving || pickerCtx) return;
+  if (document.hidden || saving || pickerCtx || !authToken) return;
   try {
-    const r = await fetch("api/state", { cache: "no-store" });
+    const r = await fetch("api/state", { cache: "no-store", headers: authHeaders() });
+    if (r.status === 401) { forceSignout("Your session expired — please sign in again."); return; }
     if (!r.ok) return;
     const data = await r.json();
     if (data.version > serverVersion) {
@@ -688,6 +974,45 @@ async function pollServer() {
       render();
     }
   } catch (e) {}
+}
+
+/* two-step sign-in with an authenticator app */
+async function serverSignin(email) {
+  try {
+    const r = await fetch("api/auth/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+    if (r.status === 404) { toast("This email isn't on the team yet — ask your manager to add you."); return; }
+    if (!r.ok) { toast("Couldn't start sign-in — please try again."); return; }
+    const data = await r.json();
+    signinStep = { mode: data.mode, email, secret: data.secret, otpauth: data.otpauth };
+    render();
+  } catch (e) { toast("Couldn't reach the server — check your connection."); }
+}
+
+async function serverVerify() {
+  const codeEl = document.getElementById("si-code");
+  const code = (codeEl ? codeEl.value : "").replace(/\s+/g, "");
+  if (!/^\d{6}$/.test(code)) { toast("Enter the 6-digit code from your authenticator app."); return; }
+  const email = signinStep && signinStep.email;
+  try {
+    const r = await fetch("api/auth/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code }) });
+    if (r.status === 401) { toast("That code didn't match — check your authenticator and try again."); return; }
+    if (!r.ok) { toast("Sign-in failed — please start again."); signinStep = null; render(); return; }
+    const data = await r.json();
+    authToken = data.token;
+    try { localStorage.setItem(LS_TOKEN, authToken); } catch (e) {}
+    const sr = await fetch("api/state", { cache: "no-store", headers: authHeaders() });
+    if (sr.ok) adoptServerState(await sr.json());
+    signinStep = null;
+    signIn(data.email);
+  } catch (e) { toast("Couldn't reach the server — check your connection."); }
+}
+
+async function resetTotp(email) {
+  try {
+    const r = await fetch("api/auth/reset", { method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()), body: JSON.stringify({ email }) });
+    if (r.ok) toast("Authenticator reset — they'll set it up again at next sign-in.");
+    else toast("Couldn't reset (admin only).");
+  } catch (e) { toast("Couldn't reach the server."); }
 }
 
 async function doServerSave() {
@@ -699,7 +1024,11 @@ async function doServerSave() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ version: serverVersion, state })
     });
-    if (r.status === 409) {
+    if (r.status === 401) {
+      saving = false;
+      forceSignout("Your session expired — please sign in again.");
+      return;
+    } else if (r.status === 409) {
       const data = await r.json();
       serverVersion = data.version;
       state = data.state;
@@ -780,7 +1109,10 @@ function registerWorker(name, email) {
   if (!ui.week) ui.week = nextWeekKey();
   saveSession(); render();
 }
-function signOut() { ui.email = null; saveSession(); render(); }
+function signOut() {
+  if (serverMode) { authToken = null; try { localStorage.removeItem(LS_TOKEN); } catch (e) {} }
+  ui.email = null; signinStep = null; saveSession(); render();
+}
 
 function cycleCell(dayIdx, shiftId) {
   const me = currentUser(); if (!me) return;
@@ -959,6 +1291,7 @@ function render() {
 }
 
 function renderSignin() {
+  if (serverMode && signinStep) return renderSigninCode();
   return '<div class="signin-wrap"><div class="signin-card">' +
     '<div class="signin-logo">S</div>' +
     "<h1>Shiftly</h1>" +
@@ -973,7 +1306,31 @@ function renderSignin() {
           '<button class="btn" type="submit">Join &amp; sign in</button>'
         : '<button class="btn" type="submit">Sign in</button>') +
     "</form>" +
-    '<p class="signin-foot">Workers submit availability · managers build the schedule</p>' +
+    '<p class="signin-foot">' + (serverMode ? "Protected with authenticator-app sign-in" : "Workers submit availability · managers build the schedule") + "</p>" +
+  "</div></div>";
+}
+
+function renderSigninCode() {
+  const s = signinStep;
+  const enroll = s.mode === "enroll"
+    ? '<div style="text-align:left">' +
+        '<p class="sub" style="margin:0 0 10px">First time here: add Shiftly to your authenticator app (Google or Microsoft Authenticator), then enter the code it shows.</p>' +
+        '<a class="btn secondary" style="width:100%;margin-bottom:10px" href="' + esc(s.otpauth) + '">📲 Add to authenticator app</a>' +
+        '<p class="sub" style="margin:0 0 4px">Or enter this setup key manually:</p>' +
+        '<div class="secret-box">' + esc((s.secret || "").replace(/(.{4})/g, "$1 ").trim()) + "</div>" +
+      "</div>"
+    : '<p class="sub" style="margin:0 0 12px;text-align:left">Enter the 6-digit code from your authenticator app.</p>';
+  return '<div class="signin-wrap"><div class="signin-card">' +
+    '<div class="signin-logo">S</div>' +
+    "<h1>Two-step sign-in</h1>" +
+    "<p>" + esc(s.email) + "</p>" +
+    enroll +
+    '<form onsubmit="serverVerify(); return false;" style="display:flex;flex-direction:column;gap:12px;text-align:left">' +
+      '<label for="si-code">6-digit code</label>' +
+      '<input id="si-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" autofocus>' +
+      '<button class="btn" type="submit">Verify &amp; sign in</button>' +
+    "</form>" +
+    '<button class="signout" style="margin-top:14px" onclick="signinStep=null;render()">‹ Back</button>' +
   "</div></div>";
 }
 
@@ -984,6 +1341,7 @@ function onSignin(ev) {
     toast("Enter a full email address, e.g. name@company.com");
     return false;
   }
+  if (serverMode) { serverSignin(email); return false; }
   if (signinAskName) {
     const name = document.getElementById("si-name").value.trim();
     if (name) { signinAskName = false; registerWorker(name, email); }
@@ -1313,6 +1671,7 @@ function renderAdminTeam() {
       '<div class="info"><b>' + esc(e.name) + (e.admin ? ' <span class="pill accent" style="font-size:10px;padding:2px 8px">Admin</span>' : "") + "</b>" +
       "<small>" + esc(e.email) + "</small></div>" +
       '<button class="btn secondary small" onclick="toggleAdmin(\'' + e.id + '\')">' + (e.admin ? "Make worker" : "Make admin") + "</button>" +
+      (serverMode ? '<button class="btn secondary small" onclick="resetTotp(\'' + esc(e.email) + '\')">Reset 2FA</button>' : "") +
       '<button class="btn danger small" onclick="removeEmployee(\'' + e.id + '\')">Remove</button>' +
     "</div>"
   ).join("");
