@@ -16,6 +16,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const tls = require("tls");
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = fs.existsSync("/data") ? "/data" : __dirname;
@@ -258,4 +259,122 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log("Shiftly server listening on :" + PORT + " (data: " + DATA_DIR + ")"));
+/* ---------- availability email reminders ----------
+   Sends "submit your shifts" emails to workers who haven't submitted for the
+   upcoming week, at (Israel time): Sunday 09:00, 17:00, 20:00 and Monday 09:00
+   — just before the Monday 10:00 auto-lock.
+   Requires env vars: SMTP_USER + SMTP_PASS (e.g. Gmail address + app password).
+   Optional: SMTP_HOST (default smtp.gmail.com), SMTP_PORT (465),
+             APP_URL (link in the email), REMINDER_TZ (default Asia/Jerusalem). */
+const REMINDER_SLOTS = [{ d: 0, h: 9 }, { d: 0, h: 17 }, { d: 0, h: 20 }, { d: 1, h: 9 }];
+const TZ = process.env.REMINDER_TZ || "Asia/Jerusalem";
+const SENT_FILE = path.join(DATA_DIR, "reminders-sent.json");
+let sentLog;
+try { sentLog = JSON.parse(fs.readFileSync(SENT_FILE, "utf8")); } catch (e) { sentLog = {}; }
+
+function sendMail(to, subject, text) {
+  return new Promise((resolve, reject) => {
+    const user = process.env.SMTP_USER, pass = process.env.SMTP_PASS;
+    if (!user || !pass) return reject(new Error("smtp_not_configured"));
+    const host = process.env.SMTP_HOST || "smtp.gmail.com";
+    const port = +(process.env.SMTP_PORT || 465);
+    const socket = tls.connect(port, host, { servername: host });
+    const steps = [
+      ["220", "EHLO shiftly"],
+      ["250", "AUTH LOGIN"],
+      ["334", Buffer.from(user).toString("base64")],
+      ["334", Buffer.from(pass).toString("base64")],
+      ["235", "MAIL FROM:<" + user + ">"],
+      ["250", "RCPT TO:<" + to + ">"],
+      ["250", "DATA"],
+      ["354", ["From: Shiftly <" + user + ">", "To: <" + to + ">", "Subject: " + subject,
+               "MIME-Version: 1.0", "Content-Type: text/plain; charset=utf-8", "", text, "."].join("\r\n")],
+      ["250", "QUIT"]
+    ];
+    let i = 0, buf = "";
+    socket.setTimeout(20000, () => { socket.destroy(); reject(new Error("smtp_timeout")); });
+    socket.on("data", chunk => {
+      buf += chunk.toString();
+      if (!/\r?\n$/.test(buf)) return;
+      const last = buf.trim().split(/\r?\n/).pop();
+      buf = "";
+      if (i >= steps.length) { socket.end(); return resolve(true); }
+      if (!last.startsWith(steps[i][0])) { socket.destroy(); return reject(new Error("smtp: " + last.slice(0, 120))); }
+      socket.write(steps[i][1] + "\r\n");
+      i++;
+    });
+    socket.on("error", reject);
+    socket.on("close", () => { if (i >= steps.length) resolve(true); });
+  });
+}
+
+function nowInTZ() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TZ, weekday: "short", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+  }).formatToParts(new Date());
+  const get = t => (parts.find(x => x.type === t) || {}).value;
+  return {
+    d: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday")),
+    h: (+get("hour")) % 24,
+    m: +get("minute"),
+    date: get("year") + "-" + get("month") + "-" + get("day")
+  };
+}
+
+function upcomingWeekKey(n) {
+  const [y, mo, da] = n.date.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, mo - 1, da));
+  dt.setUTCDate(dt.getUTCDate() + (7 - n.d)); /* the next Sunday */
+  return dt.toISOString().slice(0, 10);
+}
+
+function reminderTargets(weekKey) {
+  const wk = (store.state && store.state.weeks && store.state.weeks[weekKey]) || {};
+  if (wk.locked) return [];
+  const subs = wk.submissions || {};
+  const seen = new Set();
+  return (store.state.employees || []).filter(e => {
+    if (e.admin || e.pending) return false;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.email) || /@example\.com$/i.test(e.email)) return false;
+    if (subs[e.id] && subs[e.id].submittedAt) return false;
+    const k = e.email.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+async function reminderTick() {
+  const n = nowInTZ();
+  const slot = REMINDER_SLOTS.find(s => s.d === n.d && s.h === n.h && n.m < 5);
+  if (!slot) return;
+  const key = n.date + "@" + slot.h;
+  if (sentLog[key]) return;
+  sentLog[key] = Date.now();
+  try { fs.writeFileSync(SENT_FILE, JSON.stringify(sentLog)); } catch (e) {}
+  const weekKey = upcomingWeekKey(n);
+  const targets = reminderTargets(weekKey);
+  const appUrl = process.env.APP_URL || "https://shiflty-production.up.railway.app/";
+  console.log("[reminder]", key, "week", weekKey, "->", targets.length, "worker(s)");
+  for (const t of targets) {
+    try {
+      await sendMail(t.email, "Reminder: submit your shifts for next week",
+        "Hi " + t.name + ",\n\n" +
+        "You haven't submitted your availability for the week starting " + weekKey + " yet.\n" +
+        "Submissions close Monday at 10:00.\n\n" +
+        "Submit here: " + appUrl + "\n\n" +
+        "— Shiftly" + (store.state.settings && store.state.settings.company ? " · " + store.state.settings.company : ""));
+      console.log("[reminder] sent to", t.email);
+    } catch (e) { console.error("[reminder] failed for", t.email + ":", String(e.message || e)); }
+  }
+}
+setInterval(reminderTick, 60000);
+if (process.env.REMINDER_DRY) {
+  const n = nowInTZ();
+  console.log("[reminder dry-run] now:", JSON.stringify(n), "week:", upcomingWeekKey(n),
+    "targets:", reminderTargets(upcomingWeekKey(n)).map(t => t.email).join(", ") || "(none)");
+}
+
+server.listen(PORT, () => console.log("Shiftly server listening on :" + PORT + " (data: " + DATA_DIR + ")" +
+  (process.env.SMTP_USER ? " | email reminders ON" : " | email reminders OFF (set SMTP_USER + SMTP_PASS)")));
