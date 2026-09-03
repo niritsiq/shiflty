@@ -3320,6 +3320,17 @@ async function serverSignin(email) {
     }
     if (!r.ok) { toast("Couldn't start sign-in — please try again."); return; }
     const data = await r.json();
+    if (data.mode === "mock") {
+      /* authenticator step temporarily disabled — session issued directly */
+      authToken = data.token;
+      try { localStorage.setItem(LS_TOKEN, authToken); } catch (e) {}
+      const sr = await fetch("api/state", { cache: "no-store", headers: authHeaders() });
+      if (sr.ok) adoptServerState(await sr.json());
+      signinStep = null;
+      signIn(data.email);
+      fetchRequests();
+      return;
+    }
     signinStep = { mode: data.mode, email, secret: data.secret, otpauth: data.otpauth };
     render();
   } catch (e) { toast("Couldn't reach the server — check your connection."); }

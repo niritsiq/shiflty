@@ -19,6 +19,9 @@ const crypto = require("crypto");
 const tls = require("tls");
 
 const PORT = process.env.PORT || 3000;
+/* TEMPORARY: authenticator step is mocked — approved emails sign in without a
+   TOTP code. Set AUTH_MOCK=0 in the environment to turn real 2FA back on. */
+const AUTH_MOCK = process.env.AUTH_MOCK !== "0";
 const DATA_DIR = fs.existsSync("/data") ? "/data" : __dirname;
 const STATE_FILE = path.join(DATA_DIR, "state.json");
 const AUTH_FILE = path.join(DATA_DIR, "auth.json");
@@ -138,6 +141,12 @@ const server = http.createServer(async (req, res) => {
         if (reqRec && reqRec.status === "pending") return json(res, 403, { error: "pending" });
         if (reqRec && reqRec.status === "declined") return json(res, 403, { error: "declined" });
         return json(res, 404, { error: "not_on_team", canRequest: true });
+      }
+      if (AUTH_MOCK) {
+        const token = crypto.randomBytes(32).toString("hex");
+        auth.sessions[token] = { email: emp.email, ts: Date.now() };
+        persistAuth();
+        return json(res, 200, { mode: "mock", token, email: emp.email });
       }
       const key = String(emp.email).toLowerCase();
       let u = auth.users[key];
