@@ -3290,11 +3290,32 @@ async function initServerSync() {
   } catch (e) { return false; }
 }
 
+/* In mock-auth mode a lost session (e.g. server restarted) can be renewed
+   silently — no need to bounce the user to the sign-in screen. */
+async function silentRelogin() {
+  if (!ui.email) return false;
+  try {
+    const r = await fetch("api/auth/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: ui.email }) });
+    if (!r.ok) return false;
+    const d = await r.json();
+    if (d.mode === "mock" && d.token) {
+      authToken = d.token;
+      try { localStorage.setItem(LS_TOKEN, authToken); } catch (e) {}
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
 async function pollServer() {
   if (document.hidden || saving || pickerCtx || !authToken) return;
   try {
     const r = await fetch("api/state", { cache: "no-store", headers: authHeaders() });
-    if (r.status === 401) { forceSignout("Your session expired — please sign in again."); return; }
+    if (r.status === 401) {
+      if (await silentRelogin()) return;
+      forceSignout("Your session expired — please sign in again.");
+      return;
+    }
     if (!r.ok) return;
     const data = await r.json();
     if (data.version > serverVersion) {
@@ -3423,17 +3444,25 @@ async function resetTotp(email) {
   } catch (e) { toast("Couldn't reach the server."); }
 }
 
-async function doServerSave() {
+async function doServerSave(isRetry) {
   if (saving) return;
   saving = true;
   try {
     const r = await fetch("api/state", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
       body: JSON.stringify({ version: serverVersion, state })
     });
     if (r.status === 401) {
       saving = false;
+      if (!isRetry && await silentRelogin()) {
+        /* server restarted mid-session: refresh the version, then save once more */
+        try {
+          const sr = await fetch("api/state", { cache: "no-store", headers: authHeaders() });
+          if (sr.ok) serverVersion = (await sr.json()).version;
+        } catch (e) {}
+        return doServerSave(true);
+      }
       forceSignout("Your session expired — please sign in again.");
       return;
     } else if (r.status === 409) {

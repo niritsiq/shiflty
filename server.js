@@ -240,6 +240,11 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
 
+    if (url === "/api/health") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      return res.end("ok");
+    }
+
     if (url === "/api/state") {
       const sess = requireSession(req);
       if (!sess) return json(res, 401, { error: "auth_required" });
