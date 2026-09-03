@@ -50,7 +50,8 @@ function persistState() {
 /* ---------- auth store ---------- */
 let auth;
 try { auth = JSON.parse(fs.readFileSync(AUTH_FILE, "utf8")); if (!auth.users) throw 0; }
-catch (e) { auth = { users: {}, sessions: {} }; persistAuth(); }
+catch (e) { auth = { users: {}, sessions: {}, requests: {} }; }
+if (!auth.requests) auth.requests = {};
 function persistAuth() {
   try { fs.writeFileSync(AUTH_FILE, JSON.stringify(auth)); }
   catch (e) { console.error("persist auth failed", e); }
@@ -128,7 +129,13 @@ const server = http.createServer(async (req, res) => {
     if (url === "/api/auth/start" && req.method === "POST") {
       const { email } = JSON.parse(await readBody(req) || "{}");
       const emp = findEmployee(email);
-      if (!emp) return json(res, 404, { error: "not_on_team" });
+      if (!emp) {
+        const key = String(email || "").trim().toLowerCase();
+        const reqRec = auth.requests[key];
+        if (reqRec && reqRec.status === "pending") return json(res, 403, { error: "pending" });
+        if (reqRec && reqRec.status === "declined") return json(res, 403, { error: "declined" });
+        return json(res, 404, { error: "not_on_team", canRequest: true });
+      }
       const key = String(emp.email).toLowerCase();
       let u = auth.users[key];
       if (u && u.confirmed) return json(res, 200, { mode: "code" });
@@ -155,6 +162,57 @@ const server = http.createServer(async (req, res) => {
       auth.sessions[token] = { email: emp.email, ts: Date.now() };
       persistAuth();
       return json(res, 200, { token, email: emp.email });
+    }
+
+    if (url === "/api/auth/request" && req.method === "POST") {
+      const { name, email } = JSON.parse(await readBody(req) || "{}");
+      const cleanName = String(name || "").trim();
+      const cleanEmail = String(email || "").trim();
+      if (!cleanName || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail)) return json(res, 400, { error: "invalid" });
+      if (findEmployee(cleanEmail)) return json(res, 200, { ok: true, already: true });
+      const key = cleanEmail.toLowerCase();
+      const existing = auth.requests[key];
+      if (existing && existing.status === "declined") return json(res, 403, { error: "declined" });
+      auth.requests[key] = { name: cleanName.slice(0, 80), email: cleanEmail, ts: Date.now(), status: "pending" };
+      persistAuth();
+      return json(res, 200, { ok: true });
+    }
+
+    if (url === "/api/auth/requests" && req.method === "GET") {
+      const sess = requireSession(req);
+      if (!sess || !sess.emp.admin) return json(res, 401, { error: "admin_required" });
+      const pending = Object.values(auth.requests)
+        .filter(q => q.status === "pending")
+        .sort((a, b) => a.ts - b.ts)
+        .map(q => ({ name: q.name, email: q.email, ts: q.ts }));
+      return json(res, 200, pending);
+    }
+
+    if (url === "/api/auth/approve" && req.method === "POST") {
+      const sess = requireSession(req);
+      if (!sess || !sess.emp.admin) return json(res, 401, { error: "admin_required" });
+      const { email } = JSON.parse(await readBody(req) || "{}");
+      const key = String(email || "").trim().toLowerCase();
+      const reqRec = auth.requests[key];
+      if (!reqRec) return json(res, 404, { error: "no_request" });
+      if (!findEmployee(reqRec.email)) {
+        const id = "e" + crypto.randomBytes(4).toString("hex").slice(0, 6);
+        store.state.employees.push({ id, name: reqRec.name, email: reqRec.email, admin: false, position: "Shift worker" });
+        store = { version: store.version + 1, state: store.state };
+        persistState();
+      }
+      delete auth.requests[key];
+      persistAuth();
+      return json(res, 200, { ok: true, version: store.version });
+    }
+
+    if (url === "/api/auth/decline" && req.method === "POST") {
+      const sess = requireSession(req);
+      if (!sess || !sess.emp.admin) return json(res, 401, { error: "admin_required" });
+      const { email } = JSON.parse(await readBody(req) || "{}");
+      const key = String(email || "").trim().toLowerCase();
+      if (auth.requests[key]) { auth.requests[key].status = "declined"; persistAuth(); }
+      return json(res, 200, { ok: true });
     }
 
     if (url === "/api/auth/reset" && req.method === "POST") {

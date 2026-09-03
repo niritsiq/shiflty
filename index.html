@@ -980,6 +980,7 @@ async function pollServer() {
       state = data.state;
       render();
     }
+    fetchRequests();
   } catch (e) {}
 }
 
@@ -987,12 +988,67 @@ async function pollServer() {
 async function serverSignin(email) {
   try {
     const r = await fetch("api/auth/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
-    if (r.status === 404) { toast("This email isn't on the team yet — ask your manager to add you."); return; }
+    if (r.status === 404) { signinStep = { mode: "request", email }; render(); return; }
+    if (r.status === 403) {
+      const d = await r.json().catch(() => ({}));
+      toast(d.error === "declined"
+        ? "Your access request was declined — contact your manager."
+        : "Your request is still waiting for your manager's approval.");
+      return;
+    }
     if (!r.ok) { toast("Couldn't start sign-in — please try again."); return; }
     const data = await r.json();
     signinStep = { mode: data.mode, email, secret: data.secret, otpauth: data.otpauth };
     render();
   } catch (e) { toast("Couldn't reach the server — check your connection."); }
+}
+
+async function serverRequestAccess() {
+  const nameEl = document.getElementById("si-req-name");
+  const name = nameEl ? nameEl.value.trim() : "";
+  if (!name) { toast("Enter your name."); return; }
+  try {
+    const r = await fetch("api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email: signinStep.email }) });
+    if (r.status === 403) { toast("Your access request was declined — contact your manager."); return; }
+    if (!r.ok) { toast("Couldn't send the request — please try again."); return; }
+    const d = await r.json().catch(() => ({}));
+    if (d.already) { serverSignin(signinStep.email); return; }
+    signinStep = { mode: "requested", email: signinStep.email };
+    render();
+  } catch (e) { toast("Couldn't reach the server — check your connection."); }
+}
+
+/* admin: pending access requests */
+let accessRequests = [];
+async function fetchRequests() {
+  if (!serverMode || !authToken) return;
+  const me = currentUser();
+  if (!me || !me.admin) return;
+  try {
+    const r = await fetch("api/auth/requests", { cache: "no-store", headers: authHeaders() });
+    if (!r.ok) return;
+    const list = await r.json();
+    if (JSON.stringify(list) !== JSON.stringify(accessRequests)) { accessRequests = list; render(); }
+  } catch (e) {}
+}
+
+async function approveRequest(email) {
+  try {
+    const r = await fetch("api/auth/approve", { method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()), body: JSON.stringify({ email }) });
+    if (!r.ok) { toast("Couldn't approve — try again."); return; }
+    accessRequests = accessRequests.filter(q => q.email !== email);
+    const sr = await fetch("api/state", { cache: "no-store", headers: authHeaders() });
+    if (sr.ok) { const d = await sr.json(); serverVersion = d.version; state = d.state; }
+    toast("Approved — they can sign in now.");
+    render();
+  } catch (e) { toast("Couldn't reach the server."); }
+}
+
+async function declineRequest(email) {
+  try {
+    const r = await fetch("api/auth/decline", { method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()), body: JSON.stringify({ email }) });
+    if (r.ok) { accessRequests = accessRequests.filter(q => q.email !== email); toast("Request declined."); render(); }
+  } catch (e) { toast("Couldn't reach the server."); }
 }
 
 async function serverVerify() {
@@ -1011,6 +1067,7 @@ async function serverVerify() {
     if (sr.ok) adoptServerState(await sr.json());
     signinStep = null;
     signIn(data.email);
+    fetchRequests();
   } catch (e) { toast("Couldn't reach the server — check your connection."); }
 }
 
@@ -1319,6 +1376,29 @@ function renderSignin() {
 
 function renderSigninCode() {
   const s = signinStep;
+  if (s.mode === "request") {
+    return '<div class="signin-wrap"><div class="signin-card">' +
+      '<div class="signin-logo">S</div>' +
+      "<h1>Request access</h1>" +
+      "<p>" + esc(s.email) + '</p>' +
+      '<p class="sub" style="text-align:left;margin:0 0 12px">This email isn\'t on the team yet. Send a request — your manager will approve or decline it, and you can sign in once approved.</p>' +
+      '<form onsubmit="serverRequestAccess(); return false;" style="display:flex;flex-direction:column;gap:12px;text-align:left">' +
+        '<label for="si-req-name">Your name</label>' +
+        '<input id="si-req-name" type="text" placeholder="First and last name" autofocus>' +
+        '<button class="btn" type="submit">Send request</button>' +
+      "</form>" +
+      '<button class="signout" style="margin-top:14px" onclick="signinStep=null;render()">‹ Back</button>' +
+    "</div></div>";
+  }
+  if (s.mode === "requested") {
+    return '<div class="signin-wrap"><div class="signin-card">' +
+      '<div class="signin-logo">S</div>' +
+      "<h1>Request sent ✓</h1>" +
+      "<p>" + esc(s.email) + "</p>" +
+      '<p class="sub" style="margin:0 0 18px">Your manager has been notified. Once they approve, come back here and sign in with this email.</p>' +
+      '<button class="btn secondary" style="width:100%" onclick="signinStep=null;render()">Done</button>' +
+    "</div></div>";
+  }
   const enroll = s.mode === "enroll"
     ? '<div style="text-align:left">' +
         '<p class="sub" style="margin:0 0 10px">First time here: add Shiftly to your authenticator app (Google or Microsoft Authenticator), then enter the code it shows.</p>' +
@@ -1682,8 +1762,23 @@ function renderAdminTeam() {
       '<button class="btn danger small" onclick="removeEmployee(\'' + e.id + '\')">Remove</button>' +
     "</div>"
   ).join("");
-  return '<div class="card"><h3>Team</h3>' +
-    '<p class="sub">Workers sign in with their email — add them here, or they can join themselves from the sign-in screen.</p>' +
+  const reqCard = (serverMode && accessRequests.length)
+    ? '<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Access requests</h3>' +
+      '<span class="pill warn">' + accessRequests.length + "</span></div>" +
+      '<p class="sub">People asking to join — they can\'t sign in until you approve.</p>' +
+      accessRequests.map(q =>
+        '<div class="team-row">' +
+          '<span class="avatar">' + esc(initials(q.name || "?")) + "</span>" +
+          '<div class="info"><b>' + esc(q.name) + "</b><small>" + esc(q.email) + "</small></div>" +
+          '<button class="btn small" onclick="approveRequest(\'' + esc(q.email) + '\')">Approve</button>' +
+          '<button class="btn danger small" onclick="declineRequest(\'' + esc(q.email) + '\')">Decline</button>' +
+        "</div>"
+      ).join("") + "</div>"
+    : "";
+  return reqCard + '<div class="card"><h3>Team</h3>' +
+    '<p class="sub">' + (serverMode
+      ? "Only these emails can sign in. New people request access from the sign-in screen and appear above for your approval."
+      : "Workers sign in with their email — add them here, or they can join themselves from the sign-in screen.") + "</p>" +
     rows +
     '<div class="team-add">' +
       '<input id="add-name" placeholder="Full name" aria-label="New team member name">' +
