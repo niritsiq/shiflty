@@ -273,7 +273,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url === "/api/health") {
       res.writeHead(200, { "Content-Type": "text/plain" });
-      return res.end("ok");
+      return res.end("ok " + (db ? "db" : "json"));
     }
 
     if (url === "/api/state") {
