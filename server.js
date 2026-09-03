@@ -38,6 +38,35 @@ function seedState() {
   return null;
 }
 
+/* ---------- database (Railway PostgreSQL via DATABASE_URL) ----------
+   Primary storage when DATABASE_URL is set; the JSON files on /data remain a
+   write-through backup and the fallback when no database is configured.
+   On first boot with a database, existing JSON data migrates automatically. */
+let db = null;
+async function initDb() {
+  const url = process.env.DATABASE_URL;
+  if (!url) return false;
+  const { Pool } = require("pg");
+  db = new Pool({
+    connectionString: url,
+    ssl: /localhost|127\.0\.0\.1|railway\.internal/.test(url) ? false : { rejectUnauthorized: false }
+  });
+  await db.query("CREATE TABLE IF NOT EXISTS shiftly_kv (key TEXT PRIMARY KEY, value JSONB NOT NULL, updated_at TIMESTAMPTZ DEFAULT now())");
+  return true;
+}
+async function dbGet(key) {
+  if (!db) return null;
+  const r = await db.query("SELECT value FROM shiftly_kv WHERE key = $1", [key]);
+  return r.rows.length ? r.rows[0].value : null;
+}
+function dbPut(key, value) {
+  if (!db) return;
+  db.query(
+    "INSERT INTO shiftly_kv (key, value, updated_at) VALUES ($1, $2, now()) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = now()",
+    [key, JSON.stringify(value)]
+  ).catch(e => console.error("db write failed:", key, e.message));
+}
+
 let store;
 try {
   store = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
@@ -49,6 +78,7 @@ try {
 function persistState() {
   try { fs.writeFileSync(STATE_FILE, JSON.stringify(store)); }
   catch (e) { console.error("persist state failed", e); }
+  dbPut("state", store);
 }
 
 /* ---------- auth store ---------- */
@@ -59,6 +89,7 @@ if (!auth.requests) auth.requests = {};
 function persistAuth() {
   try { fs.writeFileSync(AUTH_FILE, JSON.stringify(auth)); }
   catch (e) { console.error("persist auth failed", e); }
+  dbPut("auth", auth);
 }
 
 /* ---------- TOTP (RFC 6238, SHA-1, 6 digits, 30s) ---------- */
@@ -367,6 +398,7 @@ async function reminderTick() {
   if (sentLog[key]) return;
   sentLog[key] = Date.now();
   try { fs.writeFileSync(SENT_FILE, JSON.stringify(sentLog)); } catch (e) {}
+  dbPut("reminders", sentLog);
   const weekKey = upcomingWeekKey(n);
   const targets = reminderTargets(weekKey);
   const appUrl = process.env.APP_URL || "https://shiflty-production.up.railway.app/";
@@ -390,5 +422,29 @@ if (process.env.REMINDER_DRY) {
     "targets:", reminderTargets(upcomingWeekKey(n)).map(t => t.email).join(", ") || "(none)");
 }
 
-server.listen(PORT, () => console.log("Shiftly server listening on :" + PORT + " (data: " + DATA_DIR + ")" +
-  (process.env.SMTP_USER ? " | email reminders ON" : " | email reminders OFF (set SMTP_USER + SMTP_PASS)")));
+(async () => {
+  let dbMode = false;
+  try {
+    dbMode = await initDb();
+    if (dbMode) {
+      const s = await dbGet("state");
+      if (s && s.state && Array.isArray(s.state.employees)) {
+        store = s;                                   /* database is the source of truth */
+      } else {
+        dbPut("state", store);                       /* first boot: migrate JSON -> db */
+        console.log("migrated state.json into the database");
+      }
+      const a = await dbGet("auth");
+      if (a && a.users) auth = a; else dbPut("auth", auth);
+      const rl = await dbGet("reminders");
+      if (rl && typeof rl === "object") sentLog = rl; else dbPut("reminders", sentLog);
+    }
+  } catch (e) {
+    console.error("database unavailable, falling back to JSON files:", e.message);
+    db = null;
+    dbMode = false;
+  }
+  server.listen(PORT, () => console.log("Shiftly server listening on :" + PORT +
+    " | storage: " + (dbMode ? "PostgreSQL (json backup: " + DATA_DIR + ")" : "JSON files (" + DATA_DIR + ") — set DATABASE_URL for PostgreSQL") +
+    (process.env.SMTP_USER ? " | email reminders ON" : " | email reminders OFF (set SMTP_USER + SMTP_PASS)")));
+})();
