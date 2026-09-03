@@ -117,7 +117,9 @@ function readBody(req) {
   });
 }
 function json(res, status, obj) {
-  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  /* Clear-Site-Data purges stale cached copies of the app the moment an old
+     page talks to this API, so nobody keeps running a pre-security version. */
+  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", "Clear-Site-Data": '"cache"' });
   res.end(JSON.stringify(obj));
 }
 
