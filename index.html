@@ -565,13 +565,6 @@
    "position": "Shift worker"
   },
   {
-   "id": "evwqlve",
-   "name": "nir cyber",
-   "email": "nir@cyberreason.com",
-   "admin": false,
-   "position": "Shift worker"
-  },
-  {
    "id": "e0oi2hu",
    "name": "nir cyber",
    "email": "nir.itzik@cybereason",
@@ -619,6 +612,13 @@
    "email": "fed@gmail.com",
    "admin": false,
    "position": "Shift worker"
+  },
+  {
+   "id": "e7idsx7",
+   "name": "ron itzik",
+   "email": "ron.itzik@cybereason.com",
+   "admin": false,
+   "position": "Shift worker"
   }
  ],
  "weeks": {
@@ -627,8 +627,7 @@
    "published": true,
    "assignments": {
     "0.morning": [
-     "e3",
-     "evwqlve"
+     "e3"
     ],
     "0.evening": [
      "ey4fxpf"
@@ -641,14 +640,12 @@
      "e4"
     ],
     "1.evening": [
-     "e3",
-     "evwqlve"
+     "e3"
     ],
     "1.night": [
      "ey4fxpf"
     ],
     "2.morning": [
-     "evwqlve",
      "e4"
     ],
     "2.evening": [
@@ -669,7 +666,6 @@
      "e4"
     ],
     "4.evening": [
-     "evwqlve",
      "e3"
     ],
     "4.night": [
@@ -686,7 +682,6 @@
      "e3"
     ],
     "6.evening": [
-     "evwqlve",
      "e4"
     ],
     "6.night": [
@@ -733,17 +728,6 @@
       "6.night": "pref"
      }
     },
-    "evwqlve": {
-     "note": "",
-     "submittedAt": "2026-08-28T11:09:27.286Z",
-     "cells": {
-      "0.morning": "yes",
-      "1.evening": "yes",
-      "2.morning": "yes",
-      "4.evening": "yes",
-      "6.evening": "yes"
-     }
-    },
     "e0oi2hu": {
      "note": "",
      "submittedAt": "2026-08-28T11:12:04.097Z",
@@ -782,6 +766,14 @@
      },
      "note": "",
      "submittedAt": "2026-08-29T16:22:05.885Z"
+    },
+    "e7idsx7": {
+     "cells": {
+      "0.morning": "yes",
+      "1.morning": "yes"
+     },
+     "note": "",
+     "submittedAt": "2026-09-03T00:16:58.807Z"
     }
    }
   },
@@ -896,7 +888,10 @@ function findEmp(email) {
   return state.employees.find(x => x.email.toLowerCase() === e) || null;
 }
 function empById(id) { return state.employees.find(x => x.id === id) || null; }
-function currentUser() { return findEmp(ui.email); }
+function currentUser() {
+  const e = findEmp(ui.email);
+  return (e && !e.pending) ? e : null; /* pending users have no access until approved */
+}
 function initials(name) { return name.split(/\s+/).map(w => w[0]).slice(0,2).join("").toUpperCase(); }
 
 /* ---------- persistence ---------- */
@@ -1158,6 +1153,7 @@ function toast(msg) {
 function signIn(email) {
   const emp = findEmp(email);
   if (!emp) return false;
+  if (emp.pending) { signinStep = { mode: "requested", email: emp.email }; render(); return true; }
   ui.email = emp.email;
   ui.tab = emp.admin ? "availability" : "submit";
   if (!ui.week) ui.week = nextWeekKey();
@@ -1167,11 +1163,17 @@ function signIn(email) {
 function registerWorker(name, email) {
   if (findEmp(email)) { signIn(email); return; } /* email already on the team — just sign in */
   const id = "e" + Math.random().toString(36).slice(2, 8);
-  state.employees.push({ id, name: name.trim(), email: email.trim(), admin: false, position: "Shift worker" });
+  /* new registrations wait for admin approval — no access until approved */
+  state.employees.push({ id, name: name.trim(), email: email.trim(), admin: false, pending: true, position: "Shift worker" });
   scheduleSave(true);
-  ui.email = email.trim(); ui.tab = "submit";
-  if (!ui.week) ui.week = nextWeekKey();
-  saveSession(); render();
+  signinStep = { mode: "requested", email: email.trim() };
+  render();
+}
+function approvePending(id) {
+  const emp = empById(id); if (!emp) return;
+  delete emp.pending;
+  toast(emp.name + " approved — they can sign in now.");
+  scheduleSave(true); render();
 }
 function signOut() {
   if (serverMode) { authToken = null; try { localStorage.removeItem(LS_TOKEN); } catch (e) {} }
@@ -1230,6 +1232,7 @@ function autoFill() {
       state.settings.shifts.forEach(s2 => (wk.assignments[d + "." + s2.id] || []).forEach(id => busyToday.add(id)));
       const rank = { pref: 0, yes: 1 };
       const cands = state.employees
+        .filter(e => !e.pending)
         .filter(e => !e.admin || wk.submissions[e.id])
         .filter(e => !list.includes(e.id) && !busyToday.has(e.id))
         .map(e => ({ e, av: (wk.submissions[e.id] || {cells:{}}).cells[key] }))
@@ -1355,7 +1358,7 @@ function render() {
 }
 
 function renderSignin() {
-  if (serverMode && signinStep) return renderSigninCode();
+  if (signinStep) return renderSigninCode();
   return '<div class="signin-wrap"><div class="signin-card">' +
     '<div class="signin-logo">S</div>' +
     "<h1>Shiftly</h1>" +
@@ -1366,8 +1369,8 @@ function renderSignin() {
       (signinAskName
         ? '<label for="si-name">Your name</label>' +
           '<input id="si-name" type="text" required placeholder="First and last name">' +
-          '<p class="signin-err">We don\'t know this email yet — enter your name to join the team.</p>' +
-          '<button class="btn" type="submit">Join &amp; sign in</button>'
+          '<p class="signin-err">We don\'t know this email yet — enter your name to request access. Your manager must approve before you can sign in.</p>' +
+          '<button class="btn" type="submit">Request access</button>'
         : '<button class="btn" type="submit">Sign in</button>') +
     "</form>" +
     '<p class="signin-foot">' + (serverMode ? "Protected with authenticator-app sign-in" : "Workers submit availability · managers build the schedule") + "</p>" +
@@ -1602,7 +1605,7 @@ function renderAdmin(me) {
 
 function renderAdminAvailability() {
   const wk = getWeek(ui.week);
-  const workers = state.employees.filter(e => !e.admin);
+  const workers = state.employees.filter(e => !e.admin && !e.pending);
   const submitted = workers.filter(w => wk.submissions[w.id] && wk.submissions[w.id].submittedAt);
   const shifts = state.settings.shifts;
 
@@ -1720,7 +1723,7 @@ function renderPicker() {
   state.settings.shifts.forEach(s2 => (wk.assignments[dayIdx + "." + s2.id] || []).forEach(id => busy.add(id)));
 
   const groups = { pref: [], yes: [], unset: [], no: [] };
-  state.employees.filter(e => !assigned.has(e.id)).forEach(e => {
+  state.employees.filter(e => !assigned.has(e.id) && !e.pending).forEach(e => {
     const av = (wk.submissions[e.id] || {cells:{}}).cells[key];
     groups[av === "pref" ? "pref" : av === "yes" ? "yes" : av === "no" ? "no" : "unset"].push(e);
   });
@@ -1752,7 +1755,7 @@ function renderPicker() {
 }
 
 function renderAdminTeam() {
-  const rows = state.employees.map(e =>
+  const rows = state.employees.filter(e => !e.pending).map(e =>
     '<div class="team-row">' +
       '<span class="avatar">' + esc(initials(e.name)) + "</span>" +
       '<div class="info"><b>' + esc(e.name) + (e.admin ? ' <span class="pill accent" style="font-size:10px;padding:2px 8px">Admin</span>' : "") + "</b>" +
@@ -1762,18 +1765,30 @@ function renderAdminTeam() {
       '<button class="btn danger small" onclick="removeEmployee(\'' + e.id + '\')">Remove</button>' +
     "</div>"
   ).join("");
-  const reqCard = (serverMode && accessRequests.length)
+  const pendingEmps = state.employees.filter(e => e.pending);
+  const reqRows =
+    accessRequests.map(q =>
+      '<div class="team-row">' +
+        '<span class="avatar">' + esc(initials(q.name || "?")) + "</span>" +
+        '<div class="info"><b>' + esc(q.name) + "</b><small>" + esc(q.email) + "</small></div>" +
+        '<button class="btn small" onclick="approveRequest(\'' + esc(q.email) + '\')">Approve</button>' +
+        '<button class="btn danger small" onclick="declineRequest(\'' + esc(q.email) + '\')">Decline</button>' +
+      "</div>"
+    ).join("") +
+    pendingEmps.map(e =>
+      '<div class="team-row">' +
+        '<span class="avatar">' + esc(initials(e.name)) + "</span>" +
+        '<div class="info"><b>' + esc(e.name) + "</b><small>" + esc(e.email) + "</small></div>" +
+        '<button class="btn small" onclick="approvePending(\'' + e.id + '\')">Approve</button>' +
+        '<button class="btn danger small" onclick="removeEmployee(\'' + e.id + '\')">Decline</button>' +
+      "</div>"
+    ).join("");
+  const reqCount = accessRequests.length + pendingEmps.length;
+  const reqCard = reqCount
     ? '<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Access requests</h3>' +
-      '<span class="pill warn">' + accessRequests.length + "</span></div>" +
-      '<p class="sub">People asking to join — they can\'t sign in until you approve.</p>' +
-      accessRequests.map(q =>
-        '<div class="team-row">' +
-          '<span class="avatar">' + esc(initials(q.name || "?")) + "</span>" +
-          '<div class="info"><b>' + esc(q.name) + "</b><small>" + esc(q.email) + "</small></div>" +
-          '<button class="btn small" onclick="approveRequest(\'' + esc(q.email) + '\')">Approve</button>' +
-          '<button class="btn danger small" onclick="declineRequest(\'' + esc(q.email) + '\')">Decline</button>' +
-        "</div>"
-      ).join("") + "</div>"
+      '<span class="pill warn">' + reqCount + "</span></div>" +
+      '<p class="sub">People asking to join — they can\'t sign in or submit shifts until you approve.</p>' +
+      reqRows + "</div>"
     : "";
   return reqCard + '<div class="card"><h3>Team</h3>' +
     '<p class="sub">' + (serverMode
