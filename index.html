@@ -3190,6 +3190,25 @@ function getWeek(key) {
   if (!state.weeks[key]) state.weeks[key] = { locked:false, published:false, assignments:{}, submissions:{} };
   return state.weeks[key];
 }
+
+/* Submissions auto-lock every Monday at 10:00 for the week starting the
+   following Sunday. The admin's per-week switch overrides in either direction. */
+function lockDeadline(weekKey) {
+  const d = parseKey(weekKey);   /* the week's Sunday, 00:00 */
+  d.setDate(d.getDate() - 6);    /* the Monday before it */
+  d.setHours(10, 0, 0, 0);
+  return d;
+}
+function isLocked(weekKey) {
+  const wk = getWeek(weekKey);
+  if (wk.lockOverride === "open") return false;      /* admin reopened */
+  if (wk.locked) return true;                        /* admin closed */
+  return Date.now() >= lockDeadline(weekKey).getTime(); /* auto: Monday 10:00 */
+}
+function fmtDeadline(weekKey) {
+  const d = lockDeadline(weekKey);
+  return d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" }) + " at 10:00";
+}
 function findEmp(email) {
   if (!email) return null;
   const e = email.trim().toLowerCase();
@@ -3502,7 +3521,7 @@ function signOut() {
 function cycleCell(dayIdx, shiftId) {
   const me = currentUser(); if (!me) return;
   const wk = getWeek(ui.week);
-  if (wk.locked) { toast("Submissions for this week are closed."); return; }
+  if (isLocked(ui.week)) { toast("Submissions for this week are closed."); return; }
   const sub = wk.submissions[me.id] || (wk.submissions[me.id] = { cells:{}, note:"", submittedAt:null });
   const key = dayIdx + "." + shiftId;
   const order = [undefined, "yes", "pref", "no"];
@@ -3515,7 +3534,7 @@ function cycleCell(dayIdx, shiftId) {
 function submitAvailability() {
   const me = currentUser(); if (!me) return;
   const wk = getWeek(ui.week);
-  if (wk.locked) { toast("Submissions for this week are closed."); return; }
+  if (isLocked(ui.week)) { toast("Submissions for this week are closed."); return; }
   const sub = wk.submissions[me.id] || (wk.submissions[me.id] = { cells:{}, note:"", submittedAt:null });
   const noteEl = document.getElementById("worker-note");
   if (noteEl) sub.note = noteEl.value.trim();
@@ -3584,8 +3603,15 @@ function publishSchedule() {
 
 function toggleLock() {
   const wk = getWeek(ui.week);
-  wk.locked = !wk.locked;
-  toast(wk.locked ? "Submissions closed for this week." : "Submissions reopened.");
+  if (isLocked(ui.week)) {
+    wk.locked = false;
+    wk.lockOverride = "open";  /* override the Monday 10:00 auto-lock for this week */
+    toast("Submissions reopened for this week (auto-lock overridden).");
+  } else {
+    wk.locked = true;
+    delete wk.lockOverride;
+    toast("Submissions closed for this week.");
+  }
   scheduleSave(false); render();
 }
 
@@ -3825,8 +3851,10 @@ function renderWorkerSubmit(me) {
   }
   grid += "</div>";
 
-  const lockedBanner = wk.locked
-    ? '<div class="banner info">🔒 Submissions for this week are closed. Contact your manager to make changes.</div>' : "";
+  const locked = isLocked(ui.week);
+  const lockedBanner = locked
+    ? '<div class="banner info">🔒 Submissions for this week closed ' + fmtDeadline(ui.week) + ". Contact your manager to make changes.</div>"
+    : '<div class="banner info">⏰ Submissions close ' + fmtDeadline(ui.week) + ".</div>";
   const submittedPill = sub.submittedAt
     ? '<span class="pill good">✓ Submitted ' + new Date(sub.submittedAt).toLocaleDateString("en-GB",{day:"numeric",month:"short"}) + "</span>"
     : '<span class="pill warn">Not submitted yet</span>';
@@ -3845,9 +3873,9 @@ function renderWorkerSubmit(me) {
       '<span><span class="dot d-unset"></span>Not set</span>' +
     "</div>" +
     '<div style="margin-top:16px"><label style="font-size:12px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em">Note to your manager (optional)</label>' +
-    '<textarea id="worker-note" rows="2" style="margin-top:6px" placeholder="e.g. I can cover extra shifts this week"' + (wk.locked ? " disabled" : "") + ">" + esc(sub.note || "") + "</textarea></div>" +
+    '<textarea id="worker-note" rows="2" style="margin-top:6px" placeholder="e.g. I can cover extra shifts this week"' + (locked ? " disabled" : "") + ">" + esc(sub.note || "") + "</textarea></div>" +
     '<div class="submit-bar">' +
-      '<button class="btn" onclick="submitAvailability()"' + (wk.locked ? " disabled" : "") + ">" + (sub.submittedAt ? "Update submission" : "Submit availability") + "</button>" +
+      '<button class="btn" onclick="submitAvailability()"' + (locked ? " disabled" : "") + ">" + (sub.submittedAt ? "Update submission" : "Submit availability") + "</button>" +
       '<span class="submit-note">Your manager sees your submission the moment you send it.</span>' +
     "</div></div>";
 }
@@ -3933,7 +3961,7 @@ function renderAdminAvailability() {
     '<div class="stat-cards">' +
       '<div class="stat"><div class="v">' + submitted.length + " / " + workers.length + '</div><div class="k">Workers submitted</div></div>' +
       '<div class="stat"><div class="v">' + (wk.published ? "Live" : "Draft") + '</div><div class="k">Schedule status</div></div>' +
-      '<div class="stat"><div class="v">' + (wk.locked ? "Closed" : "Open") + '</div><div class="k">Submissions</div></div>' +
+      '<div class="stat"><div class="v">' + (isLocked(ui.week) ? "Closed" : "Open") + '</div><div class="k">Submissions</div></div>' +
     "</div>";
 
   let head = "<tr><th>Worker</th>" +
@@ -3964,7 +3992,7 @@ function renderAdminAvailability() {
     '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
       "<div><h3>Availability submissions</h3>" +
       '<p class="sub">Each cell shows ' + shifts.map(s => esc(s.name[0]) + " = " + esc(s.name)).join(", ") + "</p></div>" +
-      '<button class="btn secondary small" onclick="toggleLock()">' + (wk.locked ? "Reopen submissions" : "Close submissions") + "</button>" +
+      '<button class="btn secondary small" onclick="toggleLock()">' + (isLocked(ui.week) ? "Reopen submissions" : "Close submissions") + "</button>" +
     "</div>" +
     '<div class="matrix-wrap"><table class="matrix"><thead>' + head + "</thead><tbody>" + body + "</tbody></table></div>" +
     '<div class="legend">' +
@@ -4143,12 +4171,21 @@ function renderAdminSettings() {
     '<div class="card"><h3>Shift hours</h3><p class="sub">Applies to every week.</p>' + shiftRows + "</div>" +
     '<div class="card"><h3>Staffing requirements</h3><p class="sub">The schedule builder and auto-fill aim for these numbers.</p>' + reqRows + "</div>" +
     '<div class="card"><h3>This week (' + weekLabel(ui.week) + ")</h3>" +
-      '<div class="set-row"><div class="lbl"><b>Accept submissions</b><small>Turn off to close availability changes for this week</small></div>' +
-      '<button class="toggle ' + (wk.locked ? "" : "on") + '" role="switch" aria-checked="' + (!wk.locked) + '" aria-label="Accept submissions" onclick="toggleLock()"><span class="knob"></span></button></div>' +
+      '<div class="set-row"><div class="lbl"><b>Accept submissions</b><small>Locks automatically every Monday at 10:00 (this week: ' + fmtDeadline(ui.week) + "). This switch overrides it for the selected week.</small></div>" +
+      '<button class="toggle ' + (isLocked(ui.week) ? "" : "on") + '" role="switch" aria-checked="' + (!isLocked(ui.week)) + '" aria-label="Accept submissions" onclick="toggleLock()"><span class="knob"></span></button></div>' +
       '<div class="set-row"><div class="lbl"><b>Schedule published</b><small>Workers can see their assigned shifts</small></div>' +
       '<button class="toggle ' + (wk.published ? "on" : "") + '" role="switch" aria-checked="' + (!!wk.published) + '" aria-label="Schedule published" onclick="publishSchedule()"><span class="knob"></span></button></div>' +
     "</div>";
 }
+
+/* re-render when the Monday 10:00 auto-lock flips while the page is open */
+let renderedLockState = null;
+setInterval(() => {
+  if (!currentUser() || pickerCtx || !ui.week) return;
+  const l = isLocked(ui.week);
+  if (renderedLockState !== null && l !== renderedLockState) render();
+  renderedLockState = l;
+}, 30000);
 
 /* ---------- boot ---------- */
 (async function boot() {
