@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0E1117">
+<title>Shiftly has moved</title>
+<meta name="description" content="This GitHub Pages address is the old Shiftly demo. The live app is at https://shiflty.onrender.com.">
+<meta name="robots" content="noindex">
+<meta http-equiv="refresh" content="6;url=https://shiflty.onrender.com">
+<link rel="canonical" href="https://shiflty.onrender.com">
+<link rel="icon" href="cybereason-logo.png" type="image/png">
+<style>
+  :root {
+    --bg: #0E1117;
+    --card: #171B24;
+    --text: #F2F4F8;
+    --text-2: #A7B0C0;
+    --text-3: #8B93A7;
+    --sep: rgba(255,255,255,0.08);
+    --accent-fill: #7B3FE4;
+    --accent-2: #00C2A8;
+    --logo-plate: #F4F5F7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    color: var(--text);
+    background:
+      radial-gradient(520px 280px at 50% 18%, rgba(123,63,228,0.20), transparent 70%),
+      var(--bg);
+    font-family: Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    position: relative;
+    overflow: hidden;
+    width: min(400px, 100%);
+    background: var(--card);
+    border: 1px solid var(--sep);
+    border-radius: 12px;
+    padding: 36px 32px 28px;
+    text-align: center;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.04), 0 16px 40px rgba(0,0,0,0.45);
+  }
+  main::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent-fill), var(--accent-2));
+  }
+  img {
+    width: 64px;
+    height: 64px;
+    border-radius: 8px;
+    margin: 4px auto 16px;
+    background: var(--logo-plate);
+    object-fit: contain;
+    display: block;
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 26px;
+    line-height: 1.2;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+  }
+  p {
+    margin: 0 0 22px;
+    color: var(--text-2);
+    line-height: 1.5;
+    font-size: 14px;
+  }
+  a.go {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-fill);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 15px;
+    padding: 10px 18px;
+    border-radius: 8px;
+  }
+  a.go:hover, a.go:focus-visible {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 3px;
+  }
+  .note {
+    margin: 18px 0 0;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+</style>
+</head>
+<body>
+  <main>
+    <img src="cybereason-logo.png" alt="Cybereason" width="64" height="64">
+    <h1>This address is the old demo.</h1>
+    <p>The real Shiftly app is on Render. This page opens it in a few seconds, or use the button.</p>
+    <a class="go" href="https://shiflty.onrender.com">Open shiflty.onrender.com</a>
+    <p class="note" id="soon">Opening the live app in a few seconds. No sign-in on this page.</p>
+  </main>
+  <script>
+    (function () {
+      var left = 6;
+      var el = document.getElementById("soon");
+      var dest = "https://shiflty.onrender.com";
+      var timer = setInterval(function () {
+        left -= 1;
+        if (left <= 0) {
+          clearInterval(timer);
+          window.location.replace(dest);
+          return;
+        }
+        if (el) el.textContent = "Opening the live app in " + left + " seconds. No sign-in on this page.";
+      }, 1000);
+    })();
+  </script>
+</body>
+</html>
