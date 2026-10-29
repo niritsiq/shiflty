@@ -22,7 +22,12 @@
      POST /api/auth/request|approve|decline, GET /api/auth/requests
                                       -> 403 join_closed
      GET  /api/state                  -> {version, state}            (session)
-     PUT  /api/state {version, state} -> {ok, version} | 409 current (session)
+     PUT  /api/state {version, state, adminToggle?}
+                                      -> {ok, version, employees} | 409 current (session)
+                                         Admin flags inside state are ignored.
+                                         adminToggle {email, admin:boolean} is the Team button.
+                                         400 canonical_admin — nir.itzik stays admin
+                                         400 self_demotion — that admin cannot clear their own flag
 
    state.notifications and state.channels are reserved arrays (empty in v1)
    so a later notifications feature can append to them without a new store.
@@ -56,6 +61,10 @@ const AUTH_POLICY = "totp-v1";
 /* firstname.lastname@cybereason.com — letters only, one dot, no plus-tags. */
 const ROSTER_EMAIL = /^[a-z]+\.[a-z]+@cybereason\.com$/;
 const LEGACY_ADMIN_EMAIL = "niritzik23@gmail.com";
+/* Seed admin. A full-state save must not clear this, including one that
+   raced a direct edit in Postgres. The in-memory roster is what sessions
+   read; it is only reloaded from the database at boot. */
+const CANONICAL_ADMIN_EMAIL = "nir.itzik@cybereason.com";
 const EMAIL_RULE = "firstname.lastname@cybereason.com";
 
 /* Canonical v1 roster. Migration adds anyone missing once; admins may
@@ -126,6 +135,10 @@ try {
   persistState();
 }
 function persistState() {
+  if (store && store.state && enforceCanonicalAdmin(store.state)) {
+    store.version = (store.version || 1) + 1;
+    console.log("restored admin for", CANONICAL_ADMIN_EMAIL);
+  }
   try { fs.writeFileSync(STATE_FILE, JSON.stringify(store)); }
   catch (e) { console.error("persist state failed", e); }
   dbPut("state", store);
@@ -327,7 +340,7 @@ function migrateRosterV1(state) {
       if (seed.admin) cur.admin = true;
     }
   }
-  const nir = kept.get("nir.itzik@cybereason.com");
+  const nir = kept.get(CANONICAL_ADMIN_EMAIL);
   if (nir && legacyWasAdmin) nir.admin = true;
   const seedEmails = new Set(SEED_EMPLOYEES.map(s => s.email));
   const extras = [];
@@ -348,6 +361,7 @@ function applyRosterMigration() {
     console.log("roster migration v1 applied:", (store.state.employees || []).length, "people on the allowlist");
   }
   if (arraysChanged || migrated) persistState();
+  healCanonicalAdmin();
 }
 /* First boot on this policy signs everyone out so the next login enrolls
    a real authenticator. Existing TOTP secrets are kept. Join requests are dropped. */
@@ -436,6 +450,64 @@ function rosterSignature(list) {
     !!(e && e.pending)
   ]).sort());
 }
+function enforceCanonicalAdmin(state) {
+  if (!state || !Array.isArray(state.employees)) return false;
+  let changed = false;
+  for (const e of state.employees) {
+    if (!e || normalizeEmail(e.email) !== CANONICAL_ADMIN_EMAIL || e.admin) continue;
+    e.admin = true;
+    changed = true;
+  }
+  return changed;
+}
+/* Bump the version when the flag actually flips so an open tab picks it up
+   on the next poll instead of saving the old roster over it. */
+function healCanonicalAdmin() {
+  if (!store || !store.state || !Array.isArray(store.state.employees)) return false;
+  const missing = store.state.employees.some(e => e && normalizeEmail(e.email) === CANONICAL_ADMIN_EMAIL && !e.admin);
+  if (!missing) return false;
+  persistState();
+  return true;
+}
+function parseAdminToggle(raw) {
+  if (raw == null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw) || typeof raw.admin !== "boolean") {
+    return { error: "invalid_state" };
+  }
+  const email = normalizeEmail(raw.email);
+  if (!isRosterEmail(email)) return { error: "invalid_email", email: String(raw.email || "") };
+  return { email, admin: raw.admin };
+}
+/* Copy admin flags from the stored roster. The client puts the whole roster
+   on every save, so a tab opened before a promotion still has admin:false.
+   adminToggle is the Team button and changes one person. */
+function reconcileAdmins(st, sess, toggle) {
+  const stored = new Map();
+  for (const e of (store.state && store.state.employees) || []) {
+    if (!e) continue;
+    const email = normalizeEmail(e.email);
+    if (!email || stored.has(email)) continue;
+    stored.set(email, !!e.admin);
+  }
+  for (const e of st.employees) {
+    const email = normalizeEmail(e.email);
+    e.admin = stored.has(email) ? stored.get(email) : false;
+    if (email === CANONICAL_ADMIN_EMAIL) e.admin = true;
+  }
+  if (!toggle) return null;
+  if (!sess.emp.admin) return { status: 403, error: "admin_required" };
+  const target = st.employees.find(e => normalizeEmail(e.email) === toggle.email);
+  if (!target || target.pending) return { status: 400, error: "not_on_team" };
+  if (!toggle.admin && toggle.email === CANONICAL_ADMIN_EMAIL) {
+    return { status: 400, error: "canonical_admin" };
+  }
+  if (!toggle.admin && toggle.email === normalizeEmail(sess.email)) {
+    return { status: 400, error: "self_demotion" };
+  }
+  target.admin = toggle.admin;
+  if (normalizeEmail(target.email) === CANONICAL_ADMIN_EMAIL) target.admin = true;
+  return null;
+}
 function rejectJoin(res) {
   return json(res, 403, { error: "join_closed" });
 }
@@ -521,6 +593,7 @@ const server = http.createServer(async (req, res) => {
     if (url === "/api/state") {
       const sess = requireSession(req);
       if (!sess) return json(res, 401, { error: "auth_required" });
+      healCanonicalAdmin();
       if (req.method === "GET") return json(res, 200, store);
       if (req.method === "PUT") {
         const parsed = JSON.parse(await readBody(req) || "{}");
@@ -538,6 +611,14 @@ const server = http.createServer(async (req, res) => {
           seen.add(email);
           e.email = email;
         }
+        const toggle = parseAdminToggle(parsed.adminToggle);
+        if (toggle && toggle.error) {
+          const body = { error: toggle.error };
+          if (toggle.email) body.email = toggle.email;
+          return json(res, 400, body);
+        }
+        const guard = reconcileAdmins(st, sess, toggle);
+        if (guard) return json(res, guard.status, { error: guard.error });
         if (!st.employees.some(e => e.admin && !e.pending)) return json(res, 400, { error: "last_admin" });
         if (!sess.emp.admin && rosterSignature(st.employees) !== rosterSignature(store.state.employees)) {
           return json(res, 403, { error: "admin_required" });
@@ -550,7 +631,7 @@ const server = http.createServer(async (req, res) => {
         }
         store = { version: store.version + 1, state: st, rosterVersion: store.rosterVersion || ROSTER_VERSION };
         persistState();
-        return json(res, 200, { ok: true, version: store.version });
+        return json(res, 200, { ok: true, version: store.version, employees: st.employees });
       }
       res.writeHead(405); return res.end();
     }

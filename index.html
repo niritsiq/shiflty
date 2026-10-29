@@ -3166,6 +3166,8 @@ function authErrorMessage(code) {
     case "admin_required": return "Only an admin can do that.";
     case "last_admin": return "The team needs at least one admin.";
     case "duplicate_email": return "That email is already on the team.";
+    case "canonical_admin": return "Nir Itzik stays an admin.";
+    case "self_demotion": return "You can't remove your own admin access. Ask another admin.";
     default: return "";
   }
 }
@@ -3202,6 +3204,7 @@ function buildHtml() {
 
 let saveTimer = null;
 let saving = false;
+let pendingAdminToggle = null;
 
 function scheduleSave(immediate) {
   try { localStorage.setItem(LS_STATE, JSON.stringify(state)); } catch(e){}
@@ -3420,19 +3423,33 @@ async function resetTotp(email) {
   } catch (e) { toast("Couldn't reach the server."); }
 }
 
+function adminBits(list) {
+  return (list || []).map(e => (e && e.email) + (e && e.admin ? "1" : "0")).join("\n");
+}
+function undoAdminToggle(adminToggle) {
+  if (!adminToggle) return;
+  const emp = findEmp(adminToggle.email);
+  if (emp) emp.admin = !adminToggle.admin;
+  render();
+}
 async function doServerSave(isRetry) {
   if (saving) return;
   saving = true;
+  const adminToggle = pendingAdminToggle;
+  pendingAdminToggle = null;
   try {
+    const payload = { version: serverVersion, state };
+    if (adminToggle) payload.adminToggle = adminToggle;
     const r = await fetch("api/state", {
       method: "PUT",
       headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
-      body: JSON.stringify({ version: serverVersion, state })
+      body: JSON.stringify(payload)
     });
     if (r.status === 401) {
       saving = false;
       if (!isRetry && await silentRelogin()) {
         /* server restarted mid-session: refresh the version, then save once more */
+        pendingAdminToggle = adminToggle;
         try {
           const sr = await fetch("api/state", { cache: "no-store", headers: authHeaders() });
           if (sr.ok) serverVersion = (await sr.json()).version;
@@ -3451,18 +3468,25 @@ async function doServerSave(isRetry) {
     } else if (r.ok) {
       const data = await r.json();
       serverVersion = data.version;
+      if (Array.isArray(data.employees) && adminBits(data.employees) !== adminBits(state.employees)) {
+        state.employees = data.employees;
+        render();
+      }
       setSaveState("Saved ✓");
       setTimeout(() => setSaveState(""), 2000);
     } else {
       const data = await r.json().catch(() => ({}));
+      undoAdminToggle(adminToggle);
       setSaveState("Not saved");
       toast(authErrorMessage(data.error) || "Couldn't save — please try again.");
     }
   } catch (e) {
+    undoAdminToggle(adminToggle);
     setSaveState("Not saved");
     toast("Couldn't reach the server — check your connection.");
   }
   saving = false;
+  if (pendingAdminToggle) scheduleSave(true);
 }
 
 async function doPublish() {
@@ -3651,8 +3675,18 @@ function removeEmployee(id) {
 }
 function toggleAdmin(id) {
   const emp = empById(id); if (!emp) return;
+  const me = currentUser();
+  if (emp.admin && emp.email === "nir.itzik@cybereason.com") {
+    toast("Nir Itzik stays an admin.");
+    return;
+  }
+  if (emp.admin && me && emp.email === me.email) {
+    toast("You can't remove your own admin access. Ask another admin.");
+    return;
+  }
   if (emp.admin && state.employees.filter(e => e.admin).length === 1) { toast("At least one admin is required."); return; }
   emp.admin = !emp.admin;
+  pendingAdminToggle = { email: emp.email, admin: !!emp.admin };
   scheduleSave(false); render();
 }
 
