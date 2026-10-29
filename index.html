@@ -1,79 +1,45 @@
 <title>Shiftly</title>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<meta name="theme-color" content="#0E1117">
+<link rel="icon" href="assets/cybereason-logo.png" type="image/png">
+<link rel="apple-touch-icon" href="assets/cybereason-logo.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap">
 <style>
-  /* ---------- Design tokens : Apple-style ---------- */
+  /* ---------- Design tokens : night-shift SOC ---------- */
   :root {
-    --bg: #F5F5F7;
-    --card: #FFFFFF;
-    --card-2: #F2F2F4;
-    --text: #1D1D1F;
-    --text-2: #6E6E73;
-    --text-3: #AEAEB2;
-    --sep: rgba(0,0,0,0.08);
-    --accent: #0071E3;
-    --accent-soft: rgba(0,113,227,0.10);
+    --bg: #0E1117;
+    --card: #171B24;
+    --card-2: #212734;
+    --text: #F2F4F8;
+    --text-2: #A7B0C0;
+    --text-3: #8B93A7;
+    --sep: rgba(255,255,255,0.08);
+    --accent: #C4B5FD;
+    --accent-fill: #7B3FE4;
+    --accent-soft: rgba(123,63,228,0.22);
+    --accent-2: #00C2A8;
     --on-accent: #FFFFFF;
-    --good: #34C759;
-    --good-soft: rgba(52,199,89,0.14);
-    --warn: #FF9500;
-    --warn-soft: rgba(255,149,0,0.14);
-    --bad: #FF3B30;
-    --bad-soft: rgba(255,59,48,0.12);
-    --chip: #E9E9EC;
-    --bar: rgba(245,245,247,0.78);
-    --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
-    --thumb-shadow: 0 1px 4px rgba(0,0,0,0.12);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #161617;
-      --card: #1D1D1F;
-      --card-2: #2C2C2E;
-      --text: #F5F5F7;
-      --text-2: #98989D;
-      --text-3: #636366;
-      --sep: rgba(255,255,255,0.10);
-      --accent: #0A84FF;
-      --accent-soft: rgba(10,132,255,0.16);
-      --on-accent: #FFFFFF;
-      --good: #30D158;
-      --good-soft: rgba(48,209,88,0.18);
-      --warn: #FF9F0A;
-      --warn-soft: rgba(255,159,10,0.18);
-      --bad: #FF453A;
-      --bad-soft: rgba(255,69,58,0.16);
-      --chip: #3A3A3C;
-      --bar: rgba(22,22,23,0.72);
-      --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 8px 24px rgba(0,0,0,0.35);
-      --thumb-shadow: 0 1px 4px rgba(0,0,0,0.5);
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #161617;
-    --card: #1D1D1F;
-    --card-2: #2C2C2E;
-    --text: #F5F5F7;
-    --text-2: #98989D;
-    --text-3: #636366;
-    --sep: rgba(255,255,255,0.10);
-    --accent: #0A84FF;
-    --accent-soft: rgba(10,132,255,0.16);
-    --on-accent: #FFFFFF;
-    --good: #30D158;
-    --good-soft: rgba(48,209,88,0.18);
-    --warn: #FF9F0A;
-    --warn-soft: rgba(255,159,10,0.18);
-    --bad: #FF453A;
-    --bad-soft: rgba(255,69,58,0.16);
-    --chip: #3A3A3C;
-    --bar: rgba(22,22,23,0.72);
-    --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 8px 24px rgba(0,0,0,0.35);
-    --thumb-shadow: 0 1px 4px rgba(0,0,0,0.5);
-  }
-
-  :root {
+    --good: #3DDC97;
+    --good-soft: rgba(61,220,151,0.16);
+    --warn: #FF9F43;
+    --warn-soft: rgba(255,159,67,0.16);
+    --bad: #FF5D73;
+    --bad-soft: rgba(255,93,115,0.16);
+    --morning: #F5B942;
+    --morning-soft: rgba(245,185,66,0.16);
+    --evening: #00C2A8;
+    --evening-soft: rgba(0,194,168,0.16);
+    --night: #9AA6FF;
+    --night-soft: rgba(154,166,255,0.16);
+    --chip: #2A3142;
+    --bar: rgba(14,17,23,0.86);
+    --shadow: 0 1px 0 rgba(255,255,255,0.04), 0 16px 40px rgba(0,0,0,0.45);
+    --thumb-shadow: 0 1px 3px rgba(0,0,0,0.55);
+    --logo-plate: #F4F5F7;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --radius: 8px;
+    --radius-lg: 12px;
     /* Strong custom curves — built-in CSS easings are too weak */
     --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
     --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
@@ -82,27 +48,36 @@
 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
-  html { -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
+  html { -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; color-scheme: dark; }
   body {
-    background: var(--bg);
+    background:
+      radial-gradient(880px 460px at -8% -18%, rgba(123,63,228,0.22), transparent 58%),
+      radial-gradient(640px 380px at 108% -12%, rgba(0,194,168,0.12), transparent 52%),
+      var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     font-size: 15px;
     line-height: 1.45;
+  }
+  .mono, .day-date, .wk-label, .secret-box, .shift-badge small, .s-label small,
+  .ts-name small, .mysched-row .d small, .td-head small, .matrix th small,
+  .stat .v, input[type="time"], #si-code, .count {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
   }
   button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
   input, select, textarea {
     font: inherit; color: var(--text);
     background: var(--card-2);
-    border: 1px solid transparent;
-    border-radius: 12px;
+    border: 1px solid var(--sep);
+    border-radius: var(--radius);
     padding: 10px 14px;
     outline: none;
     width: 100%;
   }
   input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
   @media (prefers-reduced-motion: reduce) {
     /* gentler, not zero: keep color/opacity fades, drop movement */
     * { animation: none !important; }
@@ -117,20 +92,26 @@
   .topbar {
     position: sticky; top: 0; z-index: 50;
     background: var(--bar);
-    -webkit-backdrop-filter: saturate(180%) blur(20px);
-    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(140%) blur(16px);
+    backdrop-filter: saturate(140%) blur(16px);
     border-bottom: 1px solid var(--sep);
+  }
+  .topbar::after {
+    content: "";
+    position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent-fill), var(--accent-2));
+    pointer-events: none;
   }
   .topbar-inner {
     max-width: 1060px; margin: 0 auto; padding: 10px 20px;
     display: flex; align-items: center; gap: 14px;
   }
   .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; letter-spacing: -0.02em; }
-  .brand-mark {
-    width: 28px; height: 28px; border-radius: 8px;
-    background: linear-gradient(135deg, var(--accent), #5AC8FA);
-    display: inline-flex; align-items: center; justify-content: center;
-    color: #fff; font-size: 14px; font-weight: 800;
+  .brand-logo {
+    width: 24px; height: 24px; border-radius: 5px;
+    background: var(--logo-plate);
+    object-fit: contain;
+    display: block;
   }
   .spacer { flex: 1; }
   .userbox { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); }
@@ -149,11 +130,11 @@
 
   /* Segmented control */
   .seg {
-    display: inline-flex; background: var(--chip); border-radius: 12px; padding: 3px; gap: 2px;
+    display: inline-flex; background: var(--chip); border-radius: var(--radius); padding: 3px; gap: 2px;
     margin-bottom: 22px; max-width: 100%; overflow-x: auto;
   }
   .seg button {
-    padding: 7px 16px; border-radius: 9px; font-size: 14px; font-weight: 600;
+    padding: 7px 16px; border-radius: 6px; font-size: 14px; font-weight: 600;
     color: var(--text-2); white-space: nowrap;
     transition: background-color 180ms var(--ease-out-strong), color 180ms ease;
   }
@@ -163,7 +144,7 @@
   .weeknav { display: flex; align-items: center; gap: 6px; }
   .weeknav .wk-label { font-weight: 600; font-size: 14px; min-width: 150px; text-align: center; font-variant-numeric: tabular-nums; }
   .icon-btn {
-    width: 32px; height: 32px; border-radius: 50%; background: var(--chip);
+    width: 32px; height: 32px; border-radius: var(--radius); background: var(--chip);
     display: inline-flex; align-items: center; justify-content: center;
     font-size: 15px; color: var(--text);
     transition: background-color 150ms ease, transform 160ms var(--ease-out-strong);
@@ -171,7 +152,8 @@
   .icon-btn:active { transform: scale(0.92); }
 
   .card {
-    background: var(--card); border-radius: 18px; box-shadow: var(--shadow);
+    background: var(--card); border-radius: var(--radius-lg); box-shadow: var(--shadow);
+    border: 1px solid var(--sep);
     padding: 20px; margin-bottom: 16px;
   }
   .card h3 { margin: 0 0 4px; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
@@ -179,8 +161,8 @@
 
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-    background: var(--accent); color: var(--on-accent);
-    border-radius: 980px; padding: 10px 22px; font-weight: 600; font-size: 15px;
+    background: var(--accent-fill); color: var(--on-accent);
+    border-radius: var(--radius); padding: 10px 18px; font-weight: 600; font-size: 15px;
     transition: filter 160ms ease, transform 160ms var(--ease-out-strong);
   }
   .btn:active { transform: scale(0.97); }
@@ -191,7 +173,7 @@
 
   .pill {
     display: inline-flex; align-items: center; gap: 5px;
-    border-radius: 980px; padding: 3px 10px; font-size: 12px; font-weight: 600;
+    border-radius: 6px; padding: 3px 8px; font-size: 12px; font-weight: 600;
   }
   .pill.good { background: var(--good-soft); color: var(--good); }
   .pill.warn { background: var(--warn-soft); color: var(--warn); }
@@ -199,21 +181,44 @@
   .pill.neutral { background: var(--chip); color: var(--text-2); }
   .pill.accent { background: var(--accent-soft); color: var(--accent); }
 
+  .shift-pill {
+    display: inline-flex; align-items: center;
+    border-radius: 6px; padding: 2px 8px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+    background: var(--chip); color: var(--text-2);
+  }
+  .shift-pill.morning, .shift-badge.morning { background: var(--morning-soft); color: var(--morning); }
+  .shift-pill.evening, .shift-badge.evening { background: var(--evening-soft); color: var(--evening); }
+  .shift-pill.night, .shift-badge.night { background: var(--night-soft); color: var(--night); }
+  .mini.morning { box-shadow: inset 0 -2px 0 var(--morning); }
+  .mini.evening { box-shadow: inset 0 -2px 0 var(--evening); }
+  .mini.night { box-shadow: inset 0 -2px 0 var(--night); }
+
   /* ---------- Sign-in ---------- */
   .signin-wrap {
     min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    padding: 24px; background: var(--bg);
+    padding: 24px;
+    background:
+      radial-gradient(520px 280px at 50% 18%, rgba(123,63,228,0.20), transparent 70%),
+      var(--bg);
   }
   .signin-card {
-    width: 100%; max-width: 400px; background: var(--card); border-radius: 24px;
-    box-shadow: var(--shadow); padding: 40px 34px; text-align: center;
+    position: relative; overflow: hidden;
+    width: 100%; max-width: 400px; background: var(--card); border-radius: var(--radius-lg);
+    border: 1px solid var(--sep);
+    box-shadow: var(--shadow); padding: 36px 32px; text-align: center;
+  }
+  .signin-card::before {
+    content: "";
+    position: absolute; left: 0; right: 0; top: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent-fill), var(--accent-2));
   }
   .signin-logo {
-    width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 18px;
-    background: linear-gradient(135deg, var(--accent), #5AC8FA);
-    display: flex; align-items: center; justify-content: center;
-    color: #fff; font-size: 30px; font-weight: 800;
-    box-shadow: 0 8px 24px var(--accent-soft);
+    width: 64px; height: 64px; border-radius: var(--radius);
+    margin: 4px auto 16px;
+    background: var(--logo-plate);
+    object-fit: contain;
+    display: block;
   }
   .signin-card h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 6px; }
   .signin-card p { color: var(--text-2); margin: 0 0 24px; font-size: 14px; }
@@ -222,14 +227,14 @@
   .signin-err { color: var(--bad); font-size: 13px; margin: 4px 0 0; }
   .signin-foot { margin-top: 20px; font-size: 12px; color: var(--text-3); }
   .qr-box {
-    background: #fff; border-radius: 14px; padding: 14px;
+    background: #fff; border-radius: var(--radius); padding: 14px;
     width: 208px; max-width: 100%; margin: 0 auto 12px;
     box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
   }
   .qr-box svg { display: block; width: 100%; height: auto; }
   .secret-box {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    background: var(--card-2); border-radius: 10px; padding: 10px 12px;
+    background: var(--card-2); border-radius: 6px; padding: 10px 12px;
     font-size: 14px; letter-spacing: 1px; text-align: center;
     user-select: all; -webkit-user-select: all; word-break: break-all; margin-bottom: 12px;
   }
@@ -238,19 +243,20 @@
   .avail-grid { display: flex; flex-direction: column; gap: 10px; }
   .day-row {
     display: grid; grid-template-columns: 120px 1fr; gap: 14px; align-items: center;
-    padding: 12px 14px; background: var(--card-2); border-radius: 14px;
+    padding: 12px 14px; background: var(--card-2); border-radius: var(--radius);
   }
   .day-name { font-weight: 700; font-size: 14px; }
   .day-date { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
   .shift-cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .cell {
-    border-radius: 12px; padding: 9px 6px; text-align: center;
+    border-radius: var(--radius); padding: 9px 6px; text-align: center;
     background: var(--card); border: 1.5px solid var(--sep);
     transition: background-color 140ms ease, border-color 140ms ease, transform 160ms var(--ease-out-strong);
     user-select: none; -webkit-user-select: none;
   }
   .cell:active { transform: scale(0.95); }
   .cell .c-name { font-size: 12px; font-weight: 600; display: block; }
+  .cell .c-name.shift-pill { display: inline-flex; margin-bottom: 2px; }
   .cell .c-state { font-size: 11px; display: block; margin-top: 2px; color: var(--text-3); font-weight: 500; }
   .cell.yes  { background: var(--good-soft); border-color: var(--good); }
   .cell.yes .c-state { color: var(--good); }
@@ -272,13 +278,13 @@
   .mysched { display: flex; flex-direction: column; gap: 8px; }
   .mysched-row {
     display: flex; align-items: center; gap: 14px; padding: 13px 16px;
-    background: var(--card-2); border-radius: 14px;
+    background: var(--card-2); border-radius: var(--radius);
   }
   .mysched-row .d { width: 110px; font-weight: 700; font-size: 14px; }
   .mysched-row .d small { display: block; font-weight: 400; color: var(--text-2); font-variant-numeric: tabular-nums; }
   .shift-badge {
-    display: inline-flex; flex-direction: column; padding: 6px 14px; border-radius: 11px;
-    background: var(--accent-soft); color: var(--accent);
+    display: inline-flex; flex-direction: column; padding: 6px 12px; border-radius: 6px;
+    background: var(--chip); color: var(--text);
   }
   .shift-badge b { font-size: 13px; }
   .shift-badge small { font-size: 11px; opacity: .85; font-variant-numeric: tabular-nums; }
@@ -294,7 +300,7 @@
   .ts-name small { font-weight: 400; color: var(--text-3); font-variant-numeric: tabular-nums; display: block; }
   .ts-people { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; }
   .ts-chip {
-    display: inline-flex; background: var(--card-2); border-radius: 980px;
+    display: inline-flex; background: var(--card-2); border-radius: 6px;
     padding: 4px 12px; font-size: 12px; font-weight: 500;
   }
   .ts-chip.me { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
@@ -330,16 +336,16 @@
   .sched-day-head small { color: var(--text-2); font-variant-numeric: tabular-nums; }
   .shift-row {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    padding: 10px 14px; background: var(--card-2); border-radius: 13px; margin-bottom: 6px;
+    padding: 10px 14px; background: var(--card-2); border-radius: var(--radius); margin-bottom: 6px;
   }
   .shift-row .s-label { width: 130px; }
   .shift-row .s-label b { font-size: 13px; display: block; }
-  .shift-row .s-label small { color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .shift-row .s-label small { display: block; margin-top: 4px; color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
   .assigned { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
   .chip {
     display: inline-flex; align-items: center; gap: 6px;
     background: var(--card); border: 1px solid var(--sep);
-    border-radius: 980px; padding: 4px 6px 4px 12px; font-size: 13px; font-weight: 500;
+    border-radius: 6px; padding: 4px 6px 4px 10px; font-size: 13px; font-weight: 500;
   }
   .chip .x {
     width: 18px; height: 18px; border-radius: 50%; background: var(--chip);
@@ -347,7 +353,7 @@
   }
   .chip.warnchip { border-color: var(--warn); background: var(--warn-soft); }
   .addbtn {
-    border: 1.5px dashed var(--text-3); color: var(--text-2); border-radius: 980px;
+    border: 1.5px dashed var(--text-3); color: var(--text-2); border-radius: 6px;
     padding: 4px 14px; font-size: 13px; font-weight: 500;
     transition: color 150ms ease, border-color 150ms ease, transform 160ms var(--ease-out-strong);
   }
@@ -361,7 +367,7 @@
     opacity: 1; transition: opacity 200ms ease-out;
   }
   .picker {
-    background: var(--card); border-radius: 20px; box-shadow: var(--shadow);
+    background: var(--card); border-radius: var(--radius-lg); border: 1px solid var(--sep); box-shadow: var(--shadow);
     width: 100%; max-width: 420px; max-height: 76vh; overflow-y: auto; padding: 22px;
     opacity: 1; transform: translateY(0) scale(1);
     transition: opacity 200ms var(--ease-out-strong), transform 280ms var(--ease-sheet);
@@ -380,7 +386,7 @@
   .pick-group.g-no .g-label { color: var(--bad); }
   .pick-row {
     display: flex; align-items: center; gap: 10px; width: 100%;
-    padding: 9px 10px; border-radius: 11px; text-align: left;
+    padding: 9px 10px; border-radius: var(--radius); text-align: left;
     transition: background-color 140ms ease, transform 160ms var(--ease-out-strong);
   }
   .pick-row:active { transform: scale(0.98); }
@@ -401,7 +407,8 @@
   .set-row:last-child { border-bottom: none; }
   .set-row .lbl { flex: 1; min-width: 160px; }
   .set-row .lbl b { display: block; font-size: 14px; font-weight: 600; }
-  .set-row .lbl small { color: var(--text-2); font-size: 12px; }
+  .set-row .lbl .shift-pill { margin-bottom: 3px; }
+  .set-row .lbl small { display: block; color: var(--text-2); font-size: 12px; }
   .set-row input[type="time"] { width: 108px; }
   .set-row input[type="number"] { width: 76px; text-align: center; }
   .set-row input[type="text"] { max-width: 240px; }
@@ -420,14 +427,14 @@
 
   /* Banners & toast */
   .banner {
-    border-radius: 14px; padding: 11px 16px; font-size: 13px; margin-bottom: 16px;
+    border-radius: var(--radius); padding: 11px 16px; font-size: 13px; margin-bottom: 16px;
     display: flex; align-items: center; gap: 10px;
   }
   .banner.info { background: var(--accent-soft); color: var(--accent); }
   .banner.warning { background: var(--warn-soft); color: var(--warn); }
   .toast {
     position: fixed; bottom: 26px; left: 50%; transform: translate(-50%, 14px) scale(0.97);
-    background: var(--text); color: var(--bg); border-radius: 980px;
+    background: var(--text); color: var(--bg); border-radius: var(--radius);
     padding: 9px 22px; font-size: 13px; font-weight: 600; z-index: 200;
     box-shadow: var(--shadow); opacity: 0; pointer-events: none;
     max-width: 90vw; text-align: center;
@@ -438,7 +445,7 @@
 
   .stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .stat {
-    background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 16px 18px;
+    background: var(--card); border-radius: var(--radius-lg); border: 1px solid var(--sep); box-shadow: var(--shadow); padding: 16px 18px;
   }
   .stat .v { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
   .stat .k { font-size: 12px; color: var(--text-2); font-weight: 500; }
@@ -477,7 +484,7 @@
     /* phone ergonomics */
     input, select, textarea { font-size: 16px; }       /* stops iOS zoom-on-focus */
     .container { padding: 18px 14px calc(80px + env(safe-area-inset-bottom)); }
-    .card { padding: 16px 14px; border-radius: 16px; }
+    .card { padding: 16px 14px; border-radius: var(--radius-lg); }
     .topbar-inner { padding: 8px 14px; gap: 10px; }
     .topbar .pill.neutral { display: none; }            /* company chip: reclaim space */
     .userbox .uname { max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -512,7 +519,7 @@
     .overlay { align-items: flex-end; padding: 0; }
     .picker {
       max-width: 100%; max-height: 82vh;
-      border-radius: 22px 22px 0 0;
+      border-radius: 12px 12px 0 0;
       padding-bottom: calc(22px + env(safe-area-inset-bottom));
     }
   }
@@ -3638,7 +3645,7 @@ function renderSignin() {
         : "Sign in with your Cybereason email and Google Authenticator.")
     : "Workers submit availability · managers build the schedule";
   return '<div class="signin-wrap"><div class="signin-card">' +
-    '<div class="signin-logo">S</div>' +
+    '<img class="signin-logo" src="assets/cybereason-logo.png" alt="Cybereason" width="64" height="64">' +
     "<h1>Shiftly</h1>" +
     "<p>" + esc(state.settings.company) + " · shift scheduling</p>" +
     '<form onsubmit="return onSignin(event)">' +
@@ -3662,7 +3669,7 @@ function renderSigninCode() {
       "</div>"
     : '<p class="sub" style="margin:0 0 12px;text-align:left">Enter the 6-digit code from Google Authenticator.</p>';
   return '<div class="signin-wrap"><div class="signin-card">' +
-    '<div class="signin-logo">S</div>' +
+    '<img class="signin-logo" src="assets/cybereason-logo.png" alt="Cybereason" width="64" height="64">' +
     "<h1>Two-step sign-in</h1>" +
     "<p>" + esc(s.email) + "</p>" +
     enroll +
@@ -3696,7 +3703,7 @@ function onSignin(ev) {
 
 function renderTopbar(me) {
   return '<div class="topbar"><div class="topbar-inner">' +
-    '<span class="brand"><span class="brand-mark">S</span>Shiftly</span>' +
+    '<span class="brand"><img class="brand-logo" src="assets/cybereason-logo.png" alt="" width="24" height="24">Shiftly</span>' +
     '<span class="pill neutral">' + esc(state.settings.company) + "</span>" +
     '<span class="spacer"></span>' +
     '<span class="savestate" id="savestate"></span>' +
@@ -3751,7 +3758,7 @@ function renderWorkerSubmit(me) {
         const label = st === "yes" ? "Available" : st === "pref" ? "★ Preferred" : st === "no" ? "Can't work" : "Tap to set";
         return '<button class="cell ' + (st || "") + '" onclick="cycleCell(' + d + ',\'' + sh.id + '\')" ' +
           'aria-label="' + DAY_NAMES[d] + " " + esc(sh.name) + ": " + label + '">' +
-          '<span class="c-name">' + esc(sh.name) + '</span>' +
+          '<span class="c-name shift-pill ' + esc(sh.id) + '">' + esc(sh.name) + '</span>' +
           '<span class="c-state">' + label + "</span></button>";
       }).join("") +
       "</div></div>";
@@ -3803,7 +3810,7 @@ function renderWorkerSchedule(me) {
     myShifts += mine.length;
     rows += '<div class="mysched-row"><div class="d">' + DAY_SHORT[d] + "<small>" + fmtShort(date) + "</small></div>" +
       (mine.length
-        ? mine.map(sh => '<span class="shift-badge"><b>' + esc(sh.name) + "</b><small>" + sh.start + "–" + sh.end + "</small></span>").join("")
+        ? mine.map(sh => '<span class="shift-badge ' + esc(sh.id) + '"><b>' + esc(sh.name) + "</b><small>" + sh.start + "–" + sh.end + "</small></span>").join("")
         : '<span class="off">Day off</span>') +
       "</div>";
   }
@@ -3817,7 +3824,7 @@ function renderWorkerSchedule(me) {
       const list = wk.assignments[d + "." + sh.id] || [];
       if (!list.length) continue;
       shiftRows += '<div class="team-shift-row">' +
-        '<span class="ts-name">' + esc(sh.name) + " <small>" + sh.start + "–" + sh.end + "</small></span>" +
+        '<span class="ts-name"><span class="shift-pill ' + esc(sh.id) + '">' + esc(sh.name) + "</span> <small>" + sh.start + "–" + sh.end + "</small></span>" +
         '<span class="ts-people">' + list.map(id => {
           const emp = empById(id); if (!emp) return "";
           return '<span class="ts-chip' + (id === me.id ? " me" : "") + '">' + esc(emp.name) + "</span>";
@@ -3833,7 +3840,7 @@ function renderWorkerSchedule(me) {
     '<div class="mysched">' + rows + "</div></div>" +
     '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
     "<div><h3>Full team schedule</h3>" +
-    '<p class="sub">Everyone\'s shifts for the week of ' + weekLabel(ui.week) + " — you're highlighted in blue.</p></div>" +
+    '<p class="sub">Everyone\'s shifts for the week of ' + weekLabel(ui.week) + " — you're highlighted.</p></div>" +
     '<span class="pill good">Published</span></div>' +
     teamDays + "</div>";
 }
@@ -3884,7 +3891,7 @@ function renderAdminAvailability() {
     for (let d = 0; d < 7; d++) {
       cells += '<td><div class="mini-cells">' + shifts.map(sh => {
         const st = sub ? sub.cells[d + "." + sh.id] : undefined;
-        return '<span class="mini ' + (st || "") + '" title="' + esc(sh.name) + '">' + esc(sh.name[0]) + "</span>";
+        return '<span class="mini ' + esc(sh.id) + (st ? " " + st : "") + '" title="' + esc(sh.name) + '">' + esc(sh.name[0]) + "</span>";
       }).join("") + "</div></td>";
     }
     const note = sub && sub.note ? '<div class="st" title="' + esc(sub.note) + '">💬 ' + esc(sub.note.length > 34 ? sub.note.slice(0,34) + "…" : sub.note) + "</div>" : "";
@@ -3936,7 +3943,7 @@ function renderAdminSchedule() {
       }).join("");
       const countCls = list.length >= need ? "good" : (list.length ? "warn" : "neutral");
       rows += '<div class="shift-row">' +
-        '<div class="s-label"><b>' + esc(sh.name) + "</b><small>" + sh.start + "–" + sh.end + "</small></div>" +
+        '<div class="s-label"><span class="shift-pill ' + esc(sh.id) + '">' + esc(sh.name) + "</span><small>" + sh.start + "–" + sh.end + "</small></div>" +
         '<span class="pill ' + countCls + ' count">' + list.length + " / " + need + "</span>" +
         '<div class="assigned">' + chips +
           '<button class="addbtn" onclick="openPicker(' + d + ',\'' + sh.id + '\')">+ Assign</button>' +
@@ -4002,7 +4009,7 @@ function renderPicker() {
   ).join("") || '<p class="sub">Everyone is already assigned to this shift.</p>';
 
   return '<div class="overlay" onclick="if(event.target===this)closePicker()"><div class="picker" role="dialog" aria-modal="true">' +
-    "<h4>Assign — " + esc(sh.name) + "</h4>" +
+    '<h4>Assign <span class="shift-pill ' + esc(sh.id) + '">' + esc(sh.name) + "</span></h4>" +
     '<p class="sub">' + DAY_NAMES[dayIdx] + " " + fmtShort(dayDate(ui.week, dayIdx)) + " · " + sh.start + "–" + sh.end + "</p>" +
     sections +
     '<button class="btn secondary picker-close" onclick="closePicker()">Done</button>' +
@@ -4049,14 +4056,14 @@ function renderAdminSettings() {
   const wk = getWeek(ui.week);
   const shiftRows = state.settings.shifts.map(sh =>
     '<div class="set-row">' +
-      '<div class="lbl"><b>' + esc(sh.name) + ' shift</b><small>Start / end time</small></div>' +
+      '<div class="lbl"><span class="shift-pill ' + esc(sh.id) + '">' + esc(sh.name) + '</span><small>Start / end time</small></div>' +
       '<input type="time" value="' + sh.start + '" onchange="updateShiftTime(\'' + sh.id + '\',\'start\',this.value)" aria-label="' + esc(sh.name) + ' start">' +
       '<input type="time" value="' + sh.end + '" onchange="updateShiftTime(\'' + sh.id + '\',\'end\',this.value)" aria-label="' + esc(sh.name) + ' end">' +
     "</div>"
   ).join("");
   const reqRows = state.settings.shifts.map(sh =>
     '<div class="set-row">' +
-      '<div class="lbl"><b>' + esc(sh.name) + '</b><small>Workers needed per day</small></div>' +
+      '<div class="lbl"><span class="shift-pill ' + esc(sh.id) + '">' + esc(sh.name) + '</span><small>Workers needed per day</small></div>' +
       '<input type="number" min="0" max="20" value="' + (state.settings.required[sh.id] || 0) + '" onchange="updateRequired(\'' + sh.id + '\',this.value)" aria-label="Required for ' + esc(sh.name) + '">' +
     "</div>"
   ).join("");
