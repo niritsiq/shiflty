@@ -9,9 +9,14 @@
    API:
      GET  /api/config                 -> {authMock, totpRequired, emailRule}
      GET  /api/health                 -> text "ok db|json" plus X-Auth-Mock: 0|1
-     POST /api/auth/start  {email}    -> {mode:"code"} | {mode:"enroll", secret, otpauth}
-                                        | {mode:"mock", token, email} when AUTH_MOCK=1
-                                        | 400 invalid_email | 403 not_on_team
+     POST /api/auth/start  {email, reenroll?}
+                                      -> {mode:"code"} if authenticator is confirmed and reenroll is not true
+                                      -> {mode:"enroll", email, secret, otpauth}
+                                         The same unconfirmed secret is reused until it is confirmed
+                                         or {reenroll:true} replaces it (confirmed secrets included).
+                                         Replacing one does not return a session.
+                                      | {mode:"mock", token, email} when AUTH_MOCK=1
+                                      | 400 invalid_email | 403 not_on_team
      POST /api/auth/verify {email, code} -> {token, email} | 401 bad_code | 400 no_enrollment
      POST /api/auth/reset  {email}    -> 200 (admin session) — clears that user's authenticator
      POST /api/auth/request|approve|decline, GET /api/auth/requests
@@ -163,18 +168,39 @@ function hotp(secretB32, counter) {
   const code = (((h[o] & 0x7f) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1000000;
   return String(code).padStart(6, "0");
 }
+/* Two steps either side is about a minute of phone-clock drift. */
+const TOTP_DRIFT_STEPS = 2;
 function totpCheck(secretB32, code) {
   const want = String(code == null ? "" : code).replace(/\s+/g, "");
   if (!/^\d{6}$/.test(want)) return false;
   const c = Math.floor(Date.now() / 30000);
   const wantBuf = Buffer.from(want);
   let ok = false;
-  for (let w = -1; w <= 1; w++) {
+  for (let w = -TOTP_DRIFT_STEPS; w <= TOTP_DRIFT_STEPS; w++) {
     const got = Buffer.from(hotp(secretB32, c + w));
     if (got.length === wantBuf.length && crypto.timingSafeEqual(got, wantBuf)) ok = true;
   }
   return ok;
 }
+/* 6-digit form of the RFC 6238 SHA-1 vectors. A bad implementation should not boot. */
+(function checkTotpVectors() {
+  const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+  const vectors = [
+    [59, "287082"],
+    [1111111109, "081804"],
+    [1111111111, "050471"],
+    [1234567890, "005924"],
+    [2000000000, "279037"],
+    [20000000000, "353130"]
+  ];
+  for (const [sec, code] of vectors) {
+    const got = hotp(secret, Math.floor(sec / 30));
+    if (got !== code) {
+      console.error("TOTP test vector failed at", sec, "got", got, "expected", code);
+      process.exit(1);
+    }
+  }
+})();
 
 /* ---------- roster ---------- */
 function normalizeEmail(email) {
@@ -346,6 +372,37 @@ function findEmployee(email) {
   if (!emp || emp.pending) return null;
   return emp;
 }
+function dropSessionsFor(emailKey) {
+  for (const [t, s] of Object.entries(auth.sessions)) {
+    if (normalizeEmail(s.email) === emailKey) delete auth.sessions[t];
+  }
+}
+function secretUsable(secret) {
+  const raw = String(secret || "").replace(/\s+/g, "").toUpperCase();
+  return /^[A-Z2-7]{16,}$/.test(raw) && b32decode(raw).length >= 10;
+}
+/* Key URI format: issuer and account are encoded separately, and the colon
+   between them stays literal. Encoding the colon makes some authenticators
+   mis-read the secret. */
+function otpauthUri(email, secret) {
+  const issuer = "Shiftly";
+  const label = encodeURIComponent(issuer) + ":" + encodeURIComponent(email);
+  return "otpauth://totp/" + label
+    + "?secret=" + secret
+    + "&issuer=" + encodeURIComponent(issuer)
+    + "&algorithm=SHA1&digits=6&period=30";
+}
+function issueEnrollment(key, email, replace) {
+  const current = auth.users[key];
+  if (current && secretUsable(current.secret) && !current.confirmed && !replace) {
+    return { mode: "enroll", email, secret: current.secret, otpauth: otpauthUri(email, current.secret) };
+  }
+  const secret = b32encode(crypto.randomBytes(20));
+  if (current && current.confirmed) dropSessionsFor(key);
+  auth.users[key] = { secret, confirmed: false };
+  persistAuth();
+  return { mode: "enroll", email, secret, otpauth: otpauthUri(email, secret) };
+}
 function requireSession(req) {
   const h = req.headers.authorization || "";
   const token = h.startsWith("Bearer ") ? h.slice(7) : null;
@@ -397,8 +454,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url === "/api/auth/start" && req.method === "POST") {
-      const { email } = JSON.parse(await readBody(req) || "{}");
-      const key = normalizeEmail(email);
+      const body = JSON.parse(await readBody(req) || "{}");
+      const key = normalizeEmail(body.email);
+      const reenroll = body.reenroll === true;
       if (!isRosterEmail(key)) return json(res, 400, { error: "invalid_email" });
       const emp = findEmployee(key);
       if (!emp) return json(res, 403, { error: "not_on_team" });
@@ -408,17 +466,11 @@ const server = http.createServer(async (req, res) => {
         persistAuth();
         return json(res, 200, { mode: "mock", token, email: emp.email });
       }
-      let u = auth.users[key];
-      if (u && u.confirmed) return json(res, 200, { mode: "code" });
-      const secret = b32encode(crypto.randomBytes(20));
-      auth.users[key] = { secret, confirmed: false };
-      persistAuth();
-      const label = encodeURIComponent("Shiftly:" + emp.email);
-      return json(res, 200, {
-        mode: "enroll",
-        secret,
-        otpauth: "otpauth://totp/" + label + "?secret=" + secret + "&issuer=Shiftly&algorithm=SHA1&digits=6&period=30"
-      });
+      const existing = auth.users[key];
+      if (existing && existing.confirmed && secretUsable(existing.secret) && !reenroll) {
+        return json(res, 200, { mode: "code" });
+      }
+      return json(res, 200, issueEnrollment(key, emp.email, reenroll));
     }
 
     if (url === "/api/auth/verify" && req.method === "POST") {
@@ -452,9 +504,7 @@ const server = http.createServer(async (req, res) => {
       const key = normalizeEmail(email);
       if (!key) return json(res, 400, { error: "invalid_email" });
       delete auth.users[key];
-      for (const [t, s] of Object.entries(auth.sessions)) {
-        if (normalizeEmail(s.email) === key) delete auth.sessions[t];
-      }
+      dropSessionsFor(key);
       persistAuth();
       return json(res, 200, { ok: true });
     }

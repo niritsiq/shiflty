@@ -49,6 +49,12 @@ function hotp(secretB32, counter) {
 function totp(secret) {
   return hotp(secret, Math.floor(Date.now() / 30000));
 }
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+async function waitAwayFromTotpEdge() {
+  const mod = Date.now() % 30000;
+  if (mod > 26000) await sleep(30000 - mod + 400);
+  else if (mod < 400) await sleep(500);
+}
 
 let failed = 0;
 function assert(cond, msg) {
@@ -185,6 +191,13 @@ async function main() {
   assert(!html.includes("niritzik23@gmail.com"), "seed html has no legacy gmail admin");
   assert(!html.includes("Request access"), "sign-in has no request-access step");
   assert(!html.includes("registerWorker"), "open self-register helper is gone");
+  assert(html.includes("Enter a setup key"), "enroll tells people to type the key in Google Authenticator");
+  assert(html.includes("Copy setup key"), "enroll shows a copy button for the setup key");
+  assert(html.includes("Time based"), "enroll says the key is time based");
+  assert(html.includes("Set up Google Authenticator again"), "a confirmed user can start setup again");
+  assert(!html.includes("Tap to add directly"), "enroll has no otpauth tap-to-add link");
+  assert(!html.includes('href="' + "otpauth:"), "page does not link an otpauth URL");
+  assert(hotp("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", Math.floor(59 / 30)) === "287082", "rfc6238 sha1 6-digit vector");
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shiftly-auth-"));
   fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify(fixtureState()));
@@ -203,6 +216,10 @@ async function main() {
 
     const bad = await req(port, "POST", "/api/auth/start", { body: { email: "niritzik23@gmail.com" } });
     assert(bad.status === 400 && bad.json.error === "invalid_email", "gmail rejected");
+    const reenrollGmail = await req(port, "POST", "/api/auth/start", { body: { email: "niritzik23@gmail.com", reenroll: true } });
+    assert(reenrollGmail.status === 400 && reenrollGmail.json.error === "invalid_email", "reenroll does not bypass the email rule");
+    const reenrollStranger = await req(port, "POST", "/api/auth/start", { body: { email: "someone.else@cybereason.com", reenroll: true } });
+    assert(reenrollStranger.status === 403 && reenrollStranger.json.error === "not_on_team", "reenroll does not bypass the allowlist");
     const weird = await req(port, "POST", "/api/auth/start", { body: { email: "first.last.extra@cybereason.com" } });
     assert(weird.status === 400 && weird.json.error === "invalid_email", "extra dot rejected");
     const missing = await req(port, "POST", "/api/auth/start", { body: { email: "someone.else@cybereason.com" } });
@@ -262,6 +279,38 @@ async function main() {
       body: { email: "lotan.hadad@cybereason.com", code: totp(again.json.secret) }
     });
     assert(lotan2.status === 200, "new authenticator signs in");
+
+    const shoshanaEmail = "shoshana.avni@cybereason.com";
+    const first = await req(port, "POST", "/api/auth/start", { body: { email: shoshanaEmail } });
+    const second = await req(port, "POST", "/api/auth/start", { body: { email: "  Shoshana.Avni@Cybereason.com " } });
+    assert(first.status === 200 && second.status === 200 && first.json.secret === second.json.secret, "unconfirmed setup keeps the same key");
+    assert(second.json.email === shoshanaEmail, "enroll returns the canonical email");
+    const uri = second.json.otpauth || "";
+    assert(uri === "otpauth://totp/Shiftly:" + encodeURIComponent(shoshanaEmail) + "?secret=" + second.json.secret + "&issuer=Shiftly&algorithm=SHA1&digits=6&period=30", "otpauth uses a literal colon and sha1/6/30");
+    assert(!uri.includes("Shiftly%3A"), "issuer colon is not percent-encoded");
+    const replaced = await req(port, "POST", "/api/auth/start", { body: { email: shoshanaEmail, reenroll: true } });
+    assert(replaced.status === 200 && replaced.json.mode === "enroll" && replaced.json.secret !== first.json.secret && !replaced.json.token, "new setup key does not sign the user in");
+    await waitAwayFromTotpEdge();
+    const step = Math.floor(Date.now() / 30000);
+    let far = hotp(replaced.json.secret, step - 3);
+    if (far === totp(replaced.json.secret)) far = "000000";
+    const tooOld = await req(port, "POST", "/api/auth/verify", { body: { email: shoshanaEmail, code: far } });
+    assert(tooOld.status === 401 && tooOld.json.error === "bad_code", "a code three steps old is rejected");
+    const drifted = await req(port, "POST", "/api/auth/verify", { body: { email: shoshanaEmail, code: hotp(replaced.json.secret, step - 2) } });
+    assert(drifted.status === 200 && drifted.json.token, "a code two steps old still matches");
+    const back = await req(port, "POST", "/api/auth/start", { body: { email: shoshanaEmail } });
+    assert(back.status === 200 && back.json.mode === "code", "confirmed authenticator asks for a code");
+    const againKey = await req(port, "POST", "/api/auth/start", { body: { email: shoshanaEmail, reenroll: true } });
+    assert(againKey.status === 200 && againKey.json.mode === "enroll" && againKey.json.secret !== replaced.json.secret && !againKey.json.token, "confirmed user can set up again without a session");
+    const oldSession = await req(port, "GET", "/api/state", { token: drifted.json.token });
+    assert(oldSession.status === 401, "setting up again ends the previous session");
+    const stale = await req(port, "POST", "/api/auth/verify", { body: { email: shoshanaEmail, code: totp(replaced.json.secret) } });
+    assert(stale.status === 401 && stale.json.error === "bad_code", "the previous authenticator stops matching");
+    const spaced = totp(againKey.json.secret);
+    const fresh = await req(port, "POST", "/api/auth/verify", {
+      body: { email: shoshanaEmail, code: spaced.slice(0, 3) + " " + spaced.slice(3) }
+    });
+    assert(fresh.status === 200 && fresh.json.token, "spaced code from the new key signs in");
 
     const joinAsAdmin = await req(port, "POST", "/api/auth/approve", {
       token: nir.token, body: { email: "someone.else@cybereason.com" }

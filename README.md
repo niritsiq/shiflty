@@ -6,14 +6,24 @@ The app is [`index.html`](index.html) plus a small sync server, [`server.js`](se
 
 ## Sign-in
 
-Sign-in is email, then a 6-digit code from **Google Authenticator** (TOTP, RFC 6238, 30-second window). There is no Google Workspace SSO in v1.
+Sign-in is email, then a 6-digit code from **Google Authenticator** (TOTP, RFC 6238, SHA-1, 30-second period). There is no Google Workspace SSO in v1.
 
 An email can sign in only when both are true:
 
 1. It matches `firstname.lastname@cybereason.com` — the local part is lowercase letters with exactly one dot between two name parts (`lotan.hadad@cybereason.com`). The server lowercases input before checking. Addresses with extra dots, a `+tag`, another domain, or a missing last name are rejected.
 2. It is on the team roster (the allowlist). Admins add and remove people in the app. Open join and “request access” are closed.
 
-The seeded roster is the 14 Cybereason employees listed below. **Nir Itzik** (`nir.itzik@cybereason.com`) is the admin. On the first boot after this change, admin rights that belonged to `niritzik23@gmail.com` are moved to Nir, and that Gmail address is removed because it does not match the email rule. Other people already on the roster whose emails match the rule stay. People who do not match are removed and can no longer sign in. Sessions are cleared once so the next sign-in enrolls a real authenticator. Existing authenticator secrets are kept. Admins can still reset someone’s authenticator from the team screen (they scan a new QR code on the next sign-in).
+The seeded roster is the 14 Cybereason employees listed below. **Nir Itzik** (`nir.itzik@cybereason.com`) is the admin. On the first boot after this change, admin rights that belonged to `niritzik23@gmail.com` are moved to Nir, and that Gmail address is removed because it does not match the email rule. Other people already on the roster whose emails match the rule stay. People who do not match are removed and can no longer sign in. Sessions are cleared once so the next sign-in enrolls a real authenticator. Existing authenticator secrets are kept. Admins can still reset someone’s authenticator from the team screen.
+
+### Google Authenticator setup
+
+The sign-in screen says to open Google Authenticator, tap +, and choose **Enter a setup key**. The setup key is on the screen, with a copy button. The account name is the Cybereason email, and the key type is **Time based**.
+
+A QR code is optional. Scan it only with the scanner inside Google Authenticator (the + button). The phone camera opens the Passwords app for these codes, and a code from that app will not match.
+
+Until the first code is confirmed, coming back to sign-in shows the same key, so a refresh does not throw away what you just typed. **Generate a new setup key**, or **Set up Google Authenticator again**, replaces a key that was saved in the wrong app, including one that was already confirmed. That still does not sign you in — the new code has to match. Reset 2FA on the Team tab does the same for someone else.
+
+Verification accepts the current step and two steps either side, about a minute of clock drift. The allowlist, closed join, and the `AUTH_MOCK` default are unchanged.
 
 Seeded employees (all non-admin except Nir):
 
