@@ -51,7 +51,8 @@ function startServer(port, dataDir, extraEnv) {
         DATABASE_URL: "",
         AUTH_MOCK: "1",
         SMTP_USER: "",
-        SMTP_PASS: ""
+        SMTP_PASS: "",
+        REMINDER_DISABLE: "1"
       }, extraEnv || {}),
       stdio: ["ignore", "pipe", "pipe"]
     });

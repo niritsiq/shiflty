@@ -125,7 +125,20 @@ Useful environment variables:
 - `AUTH_MOCK` — `1` skips TOTP. Unset means real Google Authenticator.
 - `PORT` — listen port.
 - `DATABASE_URL` — Postgres. Without it, the server stores JSON files.
-- `SHIFTLY_DATA_DIR` — where `state.json`, `auth.json`, and `reminders-sent.json` go. Defaults to `/data` when that directory exists, otherwise the app directory. Those files are gitignored; do not commit them.
-- `SMTP_USER`, `SMTP_PASS` — availability reminder email. Optional `SMTP_HOST`, `SMTP_PORT`, `APP_URL`, `REMINDER_TZ`.
+- `SHIFTLY_DATA_DIR` — where `state.json` and `auth.json` go. Defaults to `/data` when that directory exists, otherwise the app directory. Those files are gitignored; do not commit them. `reminders-sent.json` is an old email ledger and is no longer written.
 
-`node test/auth.js` checks the email rule, TOTP, the closed join routes, and the seeded roster. `node test/notifications.js` checks the bell routes and that one team cannot read another.
+## Availability reminders
+
+Three in-app reminders per person per submission week, in Asia/Jerusalem, and only when that person has not submitted for the week. The deadline is the same Monday 10:00 lock as the app (`isLocked`).
+
+1. Sunday 09:00 — morning of the day before
+2. Sunday 17:00 — evening of the day before
+3. Monday 09:00 — one hour before the lock
+
+The Sunday 20:00 email slot is gone. Pending people are skipped. Admins are included, because My availability lets them submit. An admin who closed the week (`locked`, and not reopened) suppresses that week's reminders.
+
+The existing web process schedules this. There is no Render cron job. The free instance sleeps, so a boot catches up any of the three slots whose time has already passed in the current cycle (from Sunday 09:00 until the next Sunday 09:00, including after Monday 10:00 if the process was down). Each person gets one reminder per week per slot. The marker is the notification id in `state.notifications`, in the same JSON file or Postgres row as the rest of the state, so a redeploy does not write it again.
+
+Nothing is emailed. The rows use `type: "availability_reminder"` (`title`, `body`, `createdAt`, `week`, `recipientIds`, `readBy`, and `channelId` when the week belongs to a real team). A later mail provider can read those rows; this version does not open a mail connection.
+
+`node test/auth.js` checks the email rule, TOTP, the closed join routes, and the seeded roster. `node test/notifications.js` checks the bell routes and that one team cannot read another. `node test/reminders.js` checks the three Jerusalem slots, skip-if-submitted, catch-up without duplicates, and that no mail is sent.
