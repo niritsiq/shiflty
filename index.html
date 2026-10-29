@@ -3572,7 +3572,7 @@ function submitAvailability() {
   const noteEl = document.getElementById("worker-note");
   if (noteEl) sub.note = noteEl.value.trim();
   sub.submittedAt = new Date().toISOString();
-  toast(runtime ? "Availability submitted ✓" : "Availability saved (preview mode)");
+  toast((runtime || serverMode) ? "Availability submitted ✓" : "Availability saved (preview mode)");
   scheduleSave(true);
   render();
 }
@@ -3981,7 +3981,13 @@ function renderWorkerSchedule(me) {
 
 /* ===================== ADMIN ===================== */
 function renderAdmin(me) {
-  const tabs = [["availability","Availability"],["schedule","Schedule"],["team","Team"],["settings","Settings"]];
+  const tabs = [
+    ["availability","Availability"],
+    ["submit","My availability"],
+    ["schedule","Schedule"],
+    ["team","Team"],
+    ["settings","Settings"]
+  ];
   if (!tabs.some(t => t[0] === ui.tab)) ui.tab = "availability";
   let html =
     '<div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">' +
@@ -3992,7 +3998,8 @@ function renderAdmin(me) {
     '<div class="seg">' + tabs.map(t =>
       '<button class="' + (ui.tab === t[0] ? "on" : "") + '" onclick="setTab(\'' + t[0] + '\')">' + t[1] + "</button>"
     ).join("") + "</div>";
-  if (ui.tab === "availability") html += renderAdminAvailability();
+  if (ui.tab === "submit") html += renderWorkerSubmit(me);
+  else if (ui.tab === "availability") html += renderAdminAvailability();
   else if (ui.tab === "schedule") html += renderAdminSchedule();
   else if (ui.tab === "team") html += renderAdminTeam();
   else html += renderAdminSettings();
@@ -4001,13 +4008,13 @@ function renderAdmin(me) {
 
 function renderAdminAvailability() {
   const wk = getWeek(ui.week);
-  const workers = state.employees.filter(e => !e.admin && !e.pending);
+  const workers = state.employees.filter(e => !e.pending);
   const submitted = workers.filter(w => wk.submissions[w.id] && wk.submissions[w.id].submittedAt);
   const shifts = state.settings.shifts;
 
   let stats =
     '<div class="stat-cards">' +
-      '<div class="stat"><div class="v">' + submitted.length + " / " + workers.length + '</div><div class="k">Workers submitted</div></div>' +
+      '<div class="stat"><div class="v">' + submitted.length + " / " + workers.length + '</div><div class="k">Team submitted</div></div>' +
       '<div class="stat"><div class="v">' + (wk.published ? "Live" : "Draft") + '</div><div class="k">Schedule status</div></div>' +
       '<div class="stat"><div class="v">' + (isLocked(ui.week) ? "Closed" : "Open") + '</div><div class="k">Submissions</div></div>' +
     "</div>";
@@ -4031,7 +4038,9 @@ function renderAdminAvailability() {
     const note = sub && sub.note ? '<div class="st" title="' + esc(sub.note) + '">💬 ' + esc(sub.note.length > 34 ? sub.note.slice(0,34) + "…" : sub.note) + "</div>" : "";
     return "<tr><td><div class=\"emp-cell\">" +
       '<span class="avatar" style="width:26px;height:26px;font-size:10px">' + esc(initials(w.name)) + "</span>" +
-      '<div><div class="nm">' + esc(w.name) + " " + status + "</div>" + note + "</div></div></td>" + cells + "</tr>";
+      '<div><div class="nm">' + esc(w.name) +
+        (w.admin ? ' <span class="pill accent" style="font-size:10px;padding:2px 8px">Admin</span>' : "") +
+        " " + status + "</div>" + note + "</div></div></td>" + cells + "</tr>";
   }).join("");
 
   if (!workers.length) body = '<tr><td colspan="8" style="color:var(--text-2)">No workers yet — add your team in the Team tab.</td></tr>';
