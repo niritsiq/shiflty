@@ -38,6 +38,15 @@
      GET  /api/notifications[?channel=] -> {notifications:[]}
      POST /api/notifications/read     -> {all:true} | {ids:[]} marks read, returns the list
      POST /api/notifications/:id/read -> mark one read
+     GET  /api/me/home[?channel=]     -> home stats for this session (see README)
+                                      Same Bearer token. Weeks, shift lengths, and
+                                      notifications already in state. No second login.
+
+   Publishing: an admin save that flips a week to published stores
+   publishedBy {id, name, email} and publishedAt on that week, and appends
+   a schedule_published notification naming them. A worker save cannot
+   change published or those fields. A later save that leaves the week
+   published keeps the original actor.
 
    STUB: /api/channels and /api/notifications read and write
    state.notifications and state.channels in the same store (JSON or
@@ -61,6 +70,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const reminders = require("./reminders");
+const home = require("./home");
 
 const PORT = process.env.PORT || 3000;
 /* Real Google Authenticator codes are required unless AUTH_MOCK=1. */
@@ -692,8 +702,50 @@ function publicNotification(n, emp) {
     channelId: n.channelId || null,
     week: typeof n.week === "string" ? n.week : null,
     dayIdx: day,
-    shiftId: n.shiftId || null
+    shiftId: n.shiftId || null,
+    actor: home.publicActor(n.actor)
   };
+}
+function publishRow(ev) {
+  const who = ev.publishedBy.name || ev.publishedBy.email || "an admin";
+  const label = ev.week ? reminders.weekLabel(ev.week) : "";
+  const body = label
+    ? "Schedule for " + label + " published by " + who + "."
+    : "Schedule published by " + who + ".";
+  const row = {
+    id: "n_sp_" + crypto.randomBytes(6).toString("hex"),
+    type: "schedule_published",
+    title: "Schedule published",
+    body,
+    createdAt: ev.publishedAt,
+    week: ev.week,
+    actor: {
+      id: ev.publishedBy.id,
+      name: ev.publishedBy.name,
+      email: ev.publishedBy.email
+    },
+    readBy: {}
+  };
+  if (ev.channelId) row.channelId = ev.channelId;
+  return row;
+}
+function recordPublishEvents(events) {
+  if (!events || !events.length) return;
+  if (!store.state) return;
+  if (!Array.isArray(store.state.notifications)) store.state.notifications = [];
+  for (const ev of events) store.state.notifications.push(publishRow(ev));
+}
+function homeChannelFilter(emp, channelParam) {
+  const stored = storedChannels();
+  if (!channelParam) return { channelId: null };
+  if (!stored.length) {
+    if (channelParam !== "ch_default") return { status: 404, error: "unknown_channel" };
+    return { channelId: null };
+  }
+  const mine = channelsFor(emp);
+  if (mine.some(c => c.id === channelParam)) return { channelId: channelParam };
+  const known = stored.some(c => c.id === channelParam);
+  return { status: known ? 403 : 404, error: known ? "not_a_member" : "unknown_channel" };
 }
 function notificationList(emp, channelParam) {
   let rows = visibleNotifications(emp);
@@ -737,6 +789,9 @@ function putFullState(sess, st, toggle) {
   if (!sess.emp.admin && rosterSignature(st.employees) !== rosterSignature(store.state.employees)) {
     return { status: 403, body: { error: "admin_required" } };
   }
+  const publishedAt = new Date().toISOString();
+  const events = home.attributePublishes(store.state.weeks, st.weeks, sess.emp, publishedAt, storedChannels());
+  recordPublishEvents(events);
   /* Schedule saves must not clobber mark-read or team membership. */
   st.notifications = Array.isArray(store.state.notifications) ? store.state.notifications : [];
   st.channels = Array.isArray(store.state.channels) ? store.state.channels : [];
@@ -826,9 +881,20 @@ function putChannelState(sess, channel, st, toggle) {
   for (const [k, wk] of Object.entries(nextWeeks)) {
     if (weekBelongs(k, wk, channel, legacyHome)) delete nextWeeks[k];
   }
-  for (const [k, wk] of Object.entries(st.weeks || {})) {
+  for (const wk of Object.values(st.weeks || {})) {
     if (!wk || typeof wk !== "object") continue;
     if (!wk.channelId && channel.id !== legacyHome) wk.channelId = channel.id;
+  }
+  const events = home.attributePublishes(
+    store.state.weeks,
+    st.weeks,
+    sess.emp,
+    new Date().toISOString(),
+    stored
+  );
+  recordPublishEvents(events);
+  for (const [k, wk] of Object.entries(st.weeks || {})) {
+    if (!wk || typeof wk !== "object") continue;
     nextWeeks[k] = wk;
   }
   store.state.employees = nextEmployees;
@@ -952,6 +1018,14 @@ const server = http.createServer(async (req, res) => {
       return json(res, marked.status, marked.body);
     }
 
+    if (url === "/api/me/home" && req.method === "GET") {
+      const sess = requireSession(req);
+      if (!sess) return json(res, 401, { error: "auth_required" });
+      const filter = homeChannelFilter(sess.emp, reqUrl.searchParams.get("channel"));
+      if (filter.error) return json(res, filter.status, { error: filter.error });
+      return json(res, 200, home.buildHome(store.state, sess.emp, homeClock(), { channelId: filter.channelId }));
+    }
+
     if (url === "/api/state") {
       const sess = requireSession(req);
       if (!sess) return json(res, 401, { error: "auth_required" });
@@ -1017,6 +1091,14 @@ const server = http.createServer(async (req, res) => {
 function reminderClock() {
   if (process.env.REMINDER_NOW) {
     const frozen = new Date(process.env.REMINDER_NOW);
+    if (!isNaN(frozen.getTime())) return frozen;
+  }
+  return new Date();
+}
+/* HOME_NOW (ISO) freezes GET /api/me/home for tests. Unset in production. */
+function homeClock() {
+  if (process.env.HOME_NOW) {
+    const frozen = new Date(process.env.HOME_NOW);
     if (!isNaN(frozen.getTime())) return frozen;
   }
   return new Date();

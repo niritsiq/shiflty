@@ -98,6 +98,66 @@ Notification fields the bell reads:
 | `channelId` | Team to open. Omitted items are not broadcast across real teams |
 | `week` | Sunday `YYYY-MM-DD`. The bell jumps to that week |
 | `dayIdx`, `shiftId` | `dayIdx` is 0–6 (Sunday first). Together they scroll to the shift |
+| `actor` | `{ id, name, email }` or null. Set on `schedule_published` when an admin publishes |
+
+## Worker home
+
+`GET /api/me/home` uses the same `Authorization: Bearer` session as `/api/state`. It is the signed-in person's dashboard (a worker, or an admin who is on the roster and can be assigned). It does not take a second login. Optional `?channel=` limits the numbers to one team, with the same `403 not_a_member` / `404 unknown_channel` rules as the bell. With no query, the response covers every team this person belongs to. When `channels` is empty, that is the one implicit team.
+
+The route only reads `state`. It does not write a punch or a new table. Hours come from `settings.shifts` (`start` / `end`). A shift that ends at or before its start clock finishes the next morning. The length is that clock difference plus 24 hours. A daylight-saving fallback does not add an hour, and there is no clock-in in v1.
+
+Times are Asia/Jerusalem. The schedule week is Sunday–Saturday, and `thisWeek.week` is that Sunday (`YYYY-MM-DD`), the same key the grid already uses. A shift belongs to the calendar day it starts, so a Saturday night that ends Sunday morning stays on Saturday's week and month.
+
+| Field | Meaning |
+| --- | --- |
+| `thisWeek.shiftCount` | Published assignments for this person whose start day is in the current Israel week |
+| `thisWeek.scheduledHours` | Scheduled length of those shifts, including ones that have not started |
+| `thisMonth.scheduledHours` | Scheduled length of published assignments whose start day is in the current calendar month |
+| `thisMonth.actualHours` | The subset of those whose end time has already passed |
+| `nextShift` | Soonest published assignment that has not ended. `status` is `in_progress` or `upcoming`. Null when there isn't one |
+| `pastShifts` | Up to 5 published assignments that have ended, most recently ended first. `status` is `completed` |
+| `activity` | Up to 8 `schedule_published` rows this person can see, newest first, same shape as `GET /api/notifications` |
+
+`hoursNote` in the body restates the rule above. Unpublished weeks are ignored. Someone else's assignments are ignored. A team the person is not in is ignored.
+
+```json
+{
+  "timezone": "Asia/Jerusalem",
+  "now": "2026-10-29T10:00:00.000Z",
+  "employee": { "id": "e_lotan_hadad", "name": "Lotan Hadad", "email": "lotan.hadad@cybereason.com", "admin": false },
+  "nextShift": {
+    "week": "2026-10-25",
+    "channelId": null,
+    "dayIdx": 4,
+    "date": "2026-10-29",
+    "shiftId": "morning",
+    "name": "Morning",
+    "start": "07:00",
+    "end": "15:00",
+    "endsNextDay": false,
+    "startsAt": "2026-10-29T05:00:00.000Z",
+    "endsAt": "2026-10-29T13:00:00.000Z",
+    "hours": 8,
+    "status": "in_progress"
+  },
+  "pastShifts": [],
+  "thisWeek": { "week": "2026-10-25", "startsOn": "2026-10-25", "endsOn": "2026-10-31", "shiftCount": 1, "scheduledHours": 8 },
+  "thisMonth": { "month": "2026-10", "scheduledHours": 8, "actualHours": 0 },
+  "hoursNote": "Scheduled hours are the shift length in settings (end minus start, plus 24 hours when the shift ends the next morning). A shift counts on the Asia/Jerusalem day it starts. Actual hours are scheduled hours on published assignments this month whose end time has already passed. Shiftly does not record clock-in.",
+  "activity": []
+}
+```
+
+Instants (`now`, `startsAt`, `endsAt`, `createdAt`) are UTC ISO. `date`, `start`, and `end` are the Jerusalem calendar day and the clock times from settings. `channelId` is null on the implicit team. The example numbers above are only a shape; a real response uses the signed-in person's assignments. The clock is the request time. Leave `HOME_NOW` unset in production — tests set it to freeze that clock.
+
+### Who published
+
+An admin save that changes a week from unpublished to published writes two things:
+
+- On the week: `publishedBy` `{ id, name, email }` and `publishedAt` (ISO). A later save that leaves the week published keeps that actor, even if the client omits the fields. Unpublishing clears them. The next publish records the admin who published that time. Weeks that were already published before this field existed stay without an actor until someone publishes them again.
+- A `schedule_published` notification, which a schedule save does not wipe. `body` is `Schedule for 25 Oct – 31 Oct published by Nir Itzik.` `actor` is the same person. `week` is the Sunday key. `channelId` is set when the week belongs to a real team, so the other team does not see it.
+
+A worker save cannot publish, unpublish, or replace `publishedBy`. Availability saves still update that person's submission.
 
 Channel rows in `state.channels`: `{ id, name, memberIds, default? }`. A week with `channelId` belongs to that team. A week with no `channelId` stays on the default team (the row with `default: true`, or `ch_default`, or the first row). `GET /api/state` with stored channels returns only the caller's team (`scoped: true`, `channelId`). `PUT /api/state?channel=` merges that team's weeks and members and leaves every other team in place.
 
@@ -106,7 +166,7 @@ Channel rows in `state.channels`: `{ id, name, memberIds, default? }`. A week wi
 Shared state (`state` inside `state.json`, or the `state` key in Postgres) includes:
 
 - `employees` — the allowlist. A normal save does not change who is an admin, including a save scoped with `?channel=`. The Team button sends `adminToggle: { email, admin }` on that same PUT. `nir.itzik@cybereason.com` stays an admin. An admin cannot clear their own flag.
-- `weeks` — availability and published schedules
+- `weeks` — availability and published schedules. A published week can carry `publishedBy` and `publishedAt` (see Worker home)
 - `settings` — shifts and staffing
 - `notifications` — items for the bell (empty until something writes one)
 - `channels` — closed teams (empty means one implicit team, the current roster)
@@ -141,4 +201,4 @@ The existing web process schedules this. There is no Render cron job. The free i
 
 Nothing is emailed. The rows use `type: "availability_reminder"` (`title`, `body`, `createdAt`, `week`, `recipientIds`, `readBy`, and `channelId` when the week belongs to a real team). A later mail provider can read those rows; this version does not open a mail connection.
 
-`node test/auth.js` checks the email rule, TOTP, the closed join routes, and the seeded roster. `node test/notifications.js` checks the bell routes and that one team cannot read another. `node test/reminders.js` checks the three Jerusalem slots, skip-if-submitted, catch-up without duplicates, and that no mail is sent.
+`node test/auth.js` checks the email rule, TOTP, the closed join routes, and the seeded roster. `node test/notifications.js` checks the bell routes and that one team cannot read another. `node test/reminders.js` checks the three Jerusalem slots, skip-if-submitted, catch-up without duplicates, and that no mail is sent. `node test/home.js` checks the home hour rules (Israel week, scheduled month, actual = already ended, no clock-in) and that publishing records who did it.

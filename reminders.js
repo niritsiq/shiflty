@@ -258,6 +258,12 @@ function applyAvailabilityReminders(state, now, opts) {
 module.exports = {
   REMINDER_TZ,
   REMINDER_SLOTS,
+  partsInTz,
+  zonedToUtc,
+  parseYmd,
+  addDays,
+  formatYmd,
+  weekLabel,
   slotsForWeek,
   deadlineForWeek,
   activeReminderCycle,
