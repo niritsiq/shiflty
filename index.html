@@ -232,12 +232,38 @@
     box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
   }
   .qr-box svg { display: block; width: 100%; height: auto; }
+  .signin-card.enroll { max-width: 460px; }
+  .signin-card p.enroll-note {
+    margin: 0 0 10px; font-size: 13px; text-align: left; color: var(--text-2);
+  }
+  .enroll { text-align: left; }
+  .enroll-steps {
+    margin: 0 0 14px; padding-left: 18px;
+    color: var(--text-2); font-size: 13px;
+  }
+  .enroll-steps li { margin: 0 0 6px; }
+  .enroll-steps b { color: var(--text); }
+  .setup-meta {
+    background: var(--card-2); border: 1px solid var(--sep); border-radius: var(--radius);
+    padding: 8px 12px; margin: 0 0 12px; font-size: 13px;
+  }
+  .setup-meta div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+  .setup-meta span { color: var(--text-2); }
+  .setup-meta b { font-weight: 600; text-align: right; word-break: break-all; }
+  .setup-label {
+    font-size: 12px; font-weight: 600; color: var(--text-2);
+    text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 6px;
+  }
   .secret-box {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    background: var(--card-2); border-radius: 6px; padding: 10px 12px;
-    font-size: 14px; letter-spacing: 1px; text-align: center;
-    user-select: all; -webkit-user-select: all; word-break: break-all; margin-bottom: 12px;
+    background: var(--card-2); border: 1px solid var(--sep); border-radius: 6px; padding: 12px;
+    font-size: 16px; line-height: 1.55; letter-spacing: 0.06em; text-align: center;
+    white-space: pre-line;
+    user-select: all; -webkit-user-select: all; margin-bottom: 10px;
   }
+  .enroll-details { margin: 0 0 8px; }
+  .enroll-details summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; }
+  .enroll-restart { display: block; margin: 0 0 14px; }
 
   /* ---------- Worker availability grid ---------- */
   .avail-grid { display: flex; flex-direction: column; gap: 10px; }
@@ -480,6 +506,9 @@
     .team-add { grid-template-columns: 1fr; }
     .weeknav .wk-label { min-width: 108px; font-size: 13px; }
     .page-title { font-size: 24px; }
+    .signin-wrap { padding: 16px 12px; align-items: flex-start; }
+    .signin-card { padding: 28px 16px; margin: 8px 0 24px; }
+    .secret-box { font-size: 15px; letter-spacing: 0.04em; }
 
     /* phone ergonomics */
     input, select, textarea { font-size: 16px; }       /* stops iOS zoom-on-focus */
@@ -3131,7 +3160,7 @@ function authErrorMessage(code) {
   switch (code) {
     case "invalid_email": return "Use your Cybereason email: firstname.lastname@cybereason.com.";
     case "not_on_team": return "This email isn't on the team. An admin has to add you before you can sign in.";
-    case "bad_code": return "That code didn't match — check Google Authenticator and try again.";
+    case "bad_code": return "That code didn't match. Use the current Google Authenticator code, or set the key up again.";
     case "no_enrollment": return "That sign-in expired. Enter your email and start again.";
     case "join_closed": return "Open join is closed. Ask an admin to add your Cybereason email.";
     case "admin_required": return "Only an admin can do that.";
@@ -3291,7 +3320,7 @@ async function serverSignin(email) {
       signIn(data.email);
       return;
     }
-    signinStep = { mode: data.mode, email, secret: data.secret, otpauth: data.otpauth };
+    signinStep = { mode: data.mode, email: data.email || email, secret: data.secret, otpauth: data.otpauth };
     render();
   } catch (e) { toast("Couldn't reach the server — check your connection."); }
 }
@@ -3321,6 +3350,13 @@ async function serverVerify() {
   } catch (e) { toast("Couldn't reach the server — check your connection."); }
 }
 
+function formatSetupKey(secret) {
+  const groups = String(secret || "").replace(/\s+/g, "").toUpperCase().match(/.{1,4}/g) || [];
+  const lines = [];
+  for (let i = 0; i < groups.length; i += 4) lines.push(groups.slice(i, i + 4).join(" "));
+  return lines.join("\n");
+}
+
 function drawEnrollQr() {
   const box = document.getElementById("qr-box");
   if (!box || !signinStep || signinStep.mode !== "enroll" || !signinStep.otpauth || typeof qrcode !== "function") return;
@@ -3332,10 +3368,51 @@ function drawEnrollQr() {
   } catch (e) { box.style.display = "none"; }
 }
 
+async function copySetupKey() {
+  const secret = signinStep && String(signinStep.secret || "").replace(/\s+/g, "");
+  if (!secret) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(secret);
+      toast("Setup key copied.");
+      return;
+    }
+  } catch (e) {}
+  const el = document.getElementById("setup-key");
+  if (el && document.createRange && window.getSelection) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  toast("Select the setup key and copy it. Spaces don't matter.");
+}
+
+async function restartEnroll() {
+  const email = signinStep && signinStep.email;
+  if (!email) return;
+  try {
+    const r = await fetch("api/auth/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, reenroll: true })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data.mode !== "enroll" || !data.secret) {
+      toast(authErrorMessage(data.error) || "Couldn't start setup again.");
+      return;
+    }
+    signinStep = { mode: "enroll", email: data.email || email, secret: data.secret, otpauth: data.otpauth };
+    toast("New setup key ready. Add it in Google Authenticator, then enter the code.");
+    render();
+  } catch (e) { toast("Couldn't reach the server — check your connection."); }
+}
+
 async function resetTotp(email) {
   try {
     const r = await fetch("api/auth/reset", { method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()), body: JSON.stringify({ email }) });
-    if (r.ok) toast("Authenticator reset — they'll set it up again at next sign-in.");
+    if (r.ok) toast("Authenticator reset — they'll enter a new setup key in Google Authenticator next time.");
     else {
       const data = await r.json().catch(() => ({}));
       toast(authErrorMessage(data.error) || "Couldn't reset the authenticator.");
@@ -3658,25 +3735,47 @@ function renderSignin() {
   "</div></div>";
 }
 
+function renderEnroll(s) {
+  return '<div class="enroll">' +
+    '<ol class="enroll-steps">' +
+      "<li>Open <b>Google Authenticator</b>.</li>" +
+      "<li>Tap <b>+</b>, then <b>Enter a setup key</b>.</li>" +
+      "<li>Use the account and key below. If it asks for a type, choose <b>Time based</b>.</li>" +
+      "<li>Type the 6-digit code from that new entry here.</li>" +
+    "</ol>" +
+    '<div class="setup-meta">' +
+      "<div><span>Account</span><b>" + esc(s.email) + "</b></div>" +
+      "<div><span>Type of key</span><b>Time based</b></div>" +
+    "</div>" +
+    '<div class="setup-label">Setup key</div>' +
+    '<div class="secret-box" id="setup-key">' + esc(formatSetupKey(s.secret)) + "</div>" +
+    '<button type="button" class="btn secondary" style="width:100%;margin-bottom:12px" onclick="copySetupKey()">Copy setup key</button>' +
+    '<details class="enroll-details">' +
+      "<summary>Optional: scan a QR code inside Google Authenticator</summary>" +
+      '<p class="enroll-note">Use the scanner under the + button in Google Authenticator. The phone camera opens the Passwords app, and a code from there will not match.</p>' +
+      '<div class="qr-box" id="qr-box"></div>' +
+    "</details>" +
+    '<button type="button" class="signout enroll-restart" onclick="restartEnroll()">Saved in the wrong app? Generate a new setup key</button>' +
+  "</div>";
+}
+
+function renderReturningCode() {
+  return '<p class="enroll-note">Enter the 6-digit code from the Shiftly entry in <b>Google Authenticator</b>.</p>' +
+    '<p class="enroll-note">If that entry lives in the phone Passwords app, or the code never matches, set Google Authenticator up again. An admin can also use Reset 2FA on the Team tab.</p>' +
+    '<button type="button" class="signout enroll-restart" onclick="restartEnroll()">Set up Google Authenticator again</button>';
+}
+
 function renderSigninCode() {
   const s = signinStep;
-  const enroll = s.mode === "enroll"
-    ? '<div style="text-align:left">' +
-        '<p class="sub" style="margin:0 0 10px">First time here: scan this QR code with Google Authenticator, then enter the 6-digit code it shows.</p>' +
-        '<div class="qr-box" id="qr-box"></div>' +
-        '<a class="btn secondary" style="width:100%;margin-bottom:10px" href="' + esc(s.otpauth) + '">📲 On this phone? Tap to add directly</a>' +
-        '<details style="margin-bottom:12px"><summary class="sub" style="cursor:pointer">Can\'t scan? Enter the setup key manually</summary>' +
-        '<div class="secret-box" style="margin-top:8px">' + esc((s.secret || "").replace(/(.{4})/g, "$1 ").trim()) + "</div></details>" +
-      "</div>"
-    : '<p class="sub" style="margin:0 0 12px;text-align:left">Enter the 6-digit code from Google Authenticator.</p>';
-  return '<div class="signin-wrap"><div class="signin-card">' +
+  const enroll = s.mode === "enroll" ? renderEnroll(s) : renderReturningCode();
+  return '<div class="signin-wrap"><div class="signin-card' + (s.mode === "enroll" ? " enroll" : "") + '">' +
     '<img class="signin-logo" src="assets/cybereason-logo.png" alt="Cybereason" width="64" height="64">' +
-    "<h1>Two-step sign-in</h1>" +
+    "<h1>" + (s.mode === "enroll" ? "Set up Google Authenticator" : "Two-step sign-in") + "</h1>" +
     "<p>" + esc(s.email) + "</p>" +
     enroll +
     '<form onsubmit="serverVerify(); return false;" style="display:flex;flex-direction:column;gap:12px;text-align:left">' +
       '<label for="si-code">6-digit code</label>' +
-      '<input id="si-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" autofocus>' +
+      '<input id="si-code" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="8" placeholder="123 456" autofocus>' +
       '<button class="btn" type="submit">Verify &amp; sign in</button>' +
     "</form>" +
     '<button class="signout" style="margin-top:14px" onclick="signinStep=null;render()">‹ Back</button>' +
