@@ -3294,7 +3294,7 @@ function initials(name) { return name.split(/\s+/).map(w => w[0]).slice(0,2).joi
 const NOTIF_META = {
   schedule_published: { label: "Schedule", worker: "mysched", admin: "schedule" },
   swap_request: { label: "Swap", worker: "mysched", admin: "schedule" },
-  availability_reminder: { label: "Reminder", worker: "submit", admin: "availability" },
+  availability_reminder: { label: "Reminder", worker: "submit", admin: "submit" },
   open_shift: { label: "Open shift", worker: "mysched", admin: "schedule" }
 };
 const NOTIF_EMPTY = "You're all caught up. Schedule posts, swap requests, open shifts, and availability reminders will show up here.";
