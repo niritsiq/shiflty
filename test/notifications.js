@@ -43,17 +43,21 @@ function req(port, method, urlPath, { body, token } = {}) {
 
 function startServer(port, dataDir, extraEnv) {
   return new Promise((resolve, reject) => {
+    const env = Object.assign({}, process.env, {
+      PORT: String(port),
+      SHIFTLY_DATA_DIR: dataDir,
+      DATABASE_URL: "",
+      AUTH_MOCK: "1",
+      SMTP_USER: "",
+      SMTP_PASS: "",
+      REMINDER_DISABLE: "1"
+    }, extraEnv || {});
+    if (!extraEnv || !Object.prototype.hasOwnProperty.call(extraEnv, "RESEND_API_KEY")) delete env.RESEND_API_KEY;
+    if (!extraEnv || !Object.prototype.hasOwnProperty.call(extraEnv, "RESEND_FROM")) delete env.RESEND_FROM;
+    if (!extraEnv || !Object.prototype.hasOwnProperty.call(extraEnv, "APP_URL")) delete env.APP_URL;
     const child = spawn(process.execPath, ["server.js"], {
       cwd: ROOT,
-      env: Object.assign({}, process.env, {
-        PORT: String(port),
-        SHIFTLY_DATA_DIR: dataDir,
-        DATABASE_URL: "",
-        AUTH_MOCK: "1",
-        SMTP_USER: "",
-        SMTP_PASS: "",
-        REMINDER_DISABLE: "1"
-      }, extraEnv || {}),
+      env,
       stdio: ["ignore", "pipe", "pipe"]
     });
     let log = "";

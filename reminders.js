@@ -5,10 +5,10 @@
      hour     Monday 09:00  (one hour before)
    The free web process sleeps, so a wake delivers any of those slots whose
    wall time has already passed in the current cycle. The cycle runs from
-   Sunday 09:00 until the next Sunday 09:00. One notification id per
+   Sunday 09:00 until the next Sunday 09:00.    One notification id per
    employee, week, channel, and slot — a second pass does not add another.
-   v1 writes state.notifications only. A later Resend pass can deliver those
-   same rows; this file does not open a socket. */
+   This file only writes state.notifications. server.js emails those rows
+   through Resend; this file does not open a socket. */
 "use strict";
 
 const REMINDER_TZ = "Asia/Jerusalem";
@@ -255,6 +255,40 @@ function applyAvailabilityReminders(state, now, opts) {
   };
 }
 
+function groupForReminder(state, row) {
+  const groups = reminderGroups(state, row.week);
+  if (!row.channelId) return groups.find(g => !g.channelId) || null;
+  return groups.find(g => g.channelId === row.channelId) || null;
+}
+
+/* Rows from the current pass that still match the in-app skip rules and
+   have not been handed to Resend yet. One address per slot. */
+function pendingReminderEmails(state, pass, isRosterEmail) {
+  if (!state || !pass || !pass.weekKey || typeof isRosterEmail !== "function") return [];
+  const due = new Set(pass.slots || []);
+  const seen = new Set();
+  const out = [];
+  for (const row of state.notifications || []) {
+    if (!row || row.type !== "availability_reminder") continue;
+    if (row.week !== pass.weekKey || !due.has(row.slot)) continue;
+    if (row.emailedAt || row.emailAttemptedAt) continue;
+    const empId = row.recipientIds && row.recipientIds[0];
+    const emp = (state.employees || []).find(e => e && e.id === empId);
+    if (!emp || !emp.id || emp.pending) continue;
+    const group = groupForReminder(state, row);
+    if (!group || !acceptingSubmissions(group.wk)) continue;
+    if (group.memberIds && !group.memberIds.includes(emp.id)) continue;
+    const email = String(emp.email || "").trim().toLowerCase();
+    if (!isRosterEmail(email)) continue;
+    if (alreadySubmitted(group.wk, emp)) continue;
+    const dedupe = (row.channelId || "all") + "|" + row.slot + "|" + email;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    out.push(row);
+  }
+  return out;
+}
+
 module.exports = {
   REMINDER_TZ,
   REMINDER_SLOTS,
@@ -268,5 +302,6 @@ module.exports = {
   deadlineForWeek,
   activeReminderCycle,
   applyAvailabilityReminders,
+  pendingReminderEmails,
   reminderId
 };

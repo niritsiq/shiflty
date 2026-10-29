@@ -58,20 +58,24 @@ function req(port, method, urlPath, { body, token } = {}) {
 
 function startServer(port, dataDir, extraEnv) {
   return new Promise((resolve, reject) => {
+    const env = Object.assign({}, process.env, {
+      PORT: String(port),
+      SHIFTLY_DATA_DIR: dataDir,
+      DATABASE_URL: "",
+      AUTH_MOCK: "1",
+      REMINDER_DISABLE: "",
+      REMINDER_NOW: "2026-11-02T07:30:00.000Z",
+      SMTP_USER: "reminder-test@example.com",
+      SMTP_PASS: "not-a-real-password",
+      SMTP_HOST: "127.0.0.1",
+      SMTP_PORT: "1"
+    }, extraEnv || {});
+    if (!extraEnv || !Object.prototype.hasOwnProperty.call(extraEnv, "RESEND_API_KEY")) delete env.RESEND_API_KEY;
+    if (!extraEnv || !Object.prototype.hasOwnProperty.call(extraEnv, "RESEND_FROM")) delete env.RESEND_FROM;
+    if (!extraEnv || !Object.prototype.hasOwnProperty.call(extraEnv, "APP_URL")) delete env.APP_URL;
     const child = spawn(process.execPath, ["server.js"], {
       cwd: ROOT,
-      env: Object.assign({}, process.env, {
-        PORT: String(port),
-        SHIFTLY_DATA_DIR: dataDir,
-        DATABASE_URL: "",
-        AUTH_MOCK: "1",
-        REMINDER_DISABLE: "",
-        REMINDER_NOW: "2026-11-02T07:30:00.000Z",
-        SMTP_USER: "reminder-test@example.com",
-        SMTP_PASS: "not-a-real-password",
-        SMTP_HOST: "127.0.0.1",
-        SMTP_PORT: "1"
-      }, extraEnv || {}),
+      env,
       stdio: ["ignore", "pipe", "pipe"]
     });
     let log = "";
@@ -244,7 +248,9 @@ async function main() {
   try {
     const log = started.log();
     assert(log.includes("[reminder] in-app 6"), "boot catch-up writes six in-app reminders (" + log.trim().split("\n").filter(l => l.includes("[reminder]")).join(" | ") + ")");
-    assert(!/smtp|ECONNREFUSED|sendMail|tls/i.test(log), "boot log has no mail attempt");
+    assert(!/smtp|ECONNREFUSED|sendMail|tls/i.test(log), "boot log has no mail transport (" + log.trim().split("\n").filter(l => /smtp|ECONNREFUSED|sendMail|tls/i.test(l)).join(" | ") + ")");
+    assert(!log.includes("[mail] reminder"), "boot does not send reminder email without a key");
+    assert(log.includes("RESEND_API_KEY is unset"), "missing API key is logged and in-app rows still save");
     const lotanToken = await signIn(port, "lotan.hadad@cybereason.com");
     const shoshToken = await signIn(port, "shoshana.avni@cybereason.com");
     const nirToken = await signIn(port, "nir.itzik@cybereason.com");
