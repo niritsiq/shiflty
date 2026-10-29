@@ -67,6 +67,8 @@ The client can see the flag without signing in:
 | 401 | `auth_required` | Missing or expired session |
 | 403 | `admin_required` | Admin-only action (authenticator reset, roster edits) |
 | 400 | `last_admin` | Save would leave the team with no admin |
+| 400 | `canonical_admin` | Save tried to remove Nir Itzik's admin flag |
+| 400 | `self_demotion` | An admin tried to remove their own admin flag |
 | 400 | `duplicate_email` | Two roster rows share an email |
 | 400 | `invalid_state` | Schedule payload is missing employees, weeks, or settings |
 | 400 | `bad_request` | Body was not valid JSON |
@@ -75,7 +77,7 @@ The client can see the flag without signing in:
 
 Shared state (`state` inside `state.json`, or the `state` key in Postgres) includes:
 
-- `employees` — the allowlist
+- `employees` — the allowlist. A normal save does not change who is an admin. The Team button sends `adminToggle: { email, admin }` on `PUT /api/state`. `nir.itzik@cybereason.com` stays an admin. An admin cannot clear their own flag.
 - `weeks` — availability and published schedules
 - `settings` — shifts and staffing
 - `notifications` — reserved, always an array (empty in v1)

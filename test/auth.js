@@ -192,6 +192,9 @@ async function main() {
   assert(/const banner = \(localOnly && !runtime && !serverMode\)/.test(html), "preview banner only when storage is local-only");
   assert(!html.includes("Request access"), "sign-in has no request-access step");
   assert(!html.includes("registerWorker"), "open self-register helper is gone");
+  assert(html.includes("adminToggle"), "team role changes are sent separately from the roster");
+  assert(html.includes("canonical_admin"), "client explains that Nir stays admin");
+  assert(html.includes("self_demotion"), "client explains that you cannot drop your own admin flag");
   assert(html.includes("Enter a setup key"), "enroll tells people to type the key in Google Authenticator");
   assert(html.includes("Copy setup key"), "enroll shows a copy button for the setup key");
   assert(html.includes("Time based"), "enroll says the key is time based");
@@ -345,12 +348,121 @@ async function main() {
     });
     assert(badSave.status === 400 && badSave.json.error === "invalid_email", "admin cannot add a non-matching email");
 
-    const noAdmin = JSON.parse(JSON.stringify(cur.json.state));
-    noAdmin.employees.forEach(e => { e.admin = false; });
+    const staleRoster = JSON.parse(JSON.stringify(cur.json.state));
+    staleRoster.employees.forEach(e => { e.admin = false; });
+    staleRoster.settings.company = "Cybereason IL";
+    const staleSave = await req(port, "PUT", "/api/state", {
+      token: nir.token, body: { version: cur.json.version, state: staleRoster }
+    });
+    assert(staleSave.status === 200, "stale roster save still stores the other edits");
+    assert(staleSave.json.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "save response keeps nir admin");
+    let now = await req(port, "GET", "/api/state", { token: nir.token });
+    assert(now.json.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "stale PUT cannot demote nir");
+    assert(now.json.state.employees.find(e => e.email === "shahar.eldar@cybereason.com").admin === false, "stale PUT cannot promote someone else");
+    assert(now.json.state.settings.company === "Cybereason IL", "non-roster edits from that save are kept");
+
+    const stripped = JSON.parse(JSON.stringify(now.json.state));
+    stripped.employees = stripped.employees.filter(e => e.email !== "nir.itzik@cybereason.com" && !e.admin);
     const last = await req(port, "PUT", "/api/state", {
-      token: nir.token, body: { version: cur.json.version, state: noAdmin }
+      token: nir.token, body: { version: now.json.version, state: stripped }
     });
     assert(last.status === 400 && last.json.error === "last_admin", "cannot remove the last admin");
+    now = await req(port, "GET", "/api/state", { token: nir.token });
+    assert(now.json.state.employees.some(e => e.email === "nir.itzik@cybereason.com" && e.admin), "rejected save leaves nir in place");
+
+    const workerStale = JSON.parse(JSON.stringify(now.json.state));
+    workerStale.employees.find(e => e.email === "lotan.hadad@cybereason.com").admin = true;
+    workerStale.employees.find(e => e.email === "nir.itzik@cybereason.com").admin = false;
+    const workerFlags = await req(port, "PUT", "/api/state", {
+      token: lotan2.json.token, body: { version: now.json.version, state: workerStale }
+    });
+    assert(workerFlags.status === 200, "worker save with stale admin bits is not treated as a roster edit");
+    now = await req(port, "GET", "/api/state", { token: nir.token });
+    assert(now.json.state.employees.find(e => e.email === "lotan.hadad@cybereason.com").admin === false, "worker cannot promote himself by saving state");
+    assert(now.json.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "worker cannot demote nir by saving state");
+
+    const workerToggle = await req(port, "PUT", "/api/state", {
+      token: lotan2.json.token,
+      body: {
+        version: now.json.version,
+        state: now.json.state,
+        adminToggle: { email: "lotan.hadad@cybereason.com", admin: true }
+      }
+    });
+    assert(workerToggle.status === 403 && workerToggle.json.error === "admin_required", "worker cannot use the team toggle");
+
+    const promote = await req(port, "PUT", "/api/state", {
+      token: nir.token,
+      body: {
+        version: now.json.version,
+        state: JSON.parse(JSON.stringify(now.json.state)),
+        adminToggle: { email: "shahar.eldar@cybereason.com", admin: true }
+      }
+    });
+    assert(promote.status === 200, "team toggle can promote someone else");
+    now = await req(port, "GET", "/api/state", { token: nir.token });
+    assert(now.json.state.employees.find(e => e.email === "shahar.eldar@cybereason.com").admin === true, "shahar is admin after the toggle");
+    assert(now.json.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "promoting someone else leaves nir admin");
+
+    const shahar = await enroll(port, "shahar.eldar@cybereason.com");
+    const selfOff = await req(port, "PUT", "/api/state", {
+      token: shahar.token,
+      body: {
+        version: now.json.version,
+        state: JSON.parse(JSON.stringify(now.json.state)),
+        adminToggle: { email: "shahar.eldar@cybereason.com", admin: false }
+      }
+    });
+    assert(selfOff.status === 400 && selfOff.json.error === "self_demotion", "session user cannot demote himself");
+    const nirOff = await req(port, "PUT", "/api/state", {
+      token: shahar.token,
+      body: {
+        version: now.json.version,
+        state: JSON.parse(JSON.stringify(now.json.state)),
+        adminToggle: { email: "nir.itzik@cybereason.com", admin: false }
+      }
+    });
+    assert(nirOff.status === 400 && nirOff.json.error === "canonical_admin", "team toggle cannot demote nir");
+    now = await req(port, "GET", "/api/state", { token: shahar.token });
+    assert(now.json.state.employees.find(e => e.email === "shahar.eldar@cybereason.com").admin === true, "rejected toggles leave the session user admin");
+    assert(now.json.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "rejected toggles leave nir admin");
+
+    const bothOff = JSON.parse(JSON.stringify(now.json.state));
+    bothOff.employees.forEach(e => {
+      if (e.email === "nir.itzik@cybereason.com" || e.email === "shahar.eldar@cybereason.com") e.admin = false;
+    });
+    const sessionStale = await req(port, "PUT", "/api/state", {
+      token: shahar.token, body: { version: now.json.version, state: bothOff }
+    });
+    assert(sessionStale.status === 200, "admin can save while their copy has admin:false");
+    now = await req(port, "GET", "/api/state", { token: shahar.token });
+    assert(now.json.state.employees.find(e => e.email === "shahar.eldar@cybereason.com").admin === true, "stale PUT cannot demote the session user");
+    assert(now.json.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "that save cannot demote nir either");
+
+    const demote = await req(port, "PUT", "/api/state", {
+      token: nir.token,
+      body: {
+        version: now.json.version,
+        state: JSON.parse(JSON.stringify(now.json.state)),
+        adminToggle: { email: "Shahar.Eldar@cybereason.com", admin: false }
+      }
+    });
+    assert(demote.status === 200, "another admin can demote shahar on purpose");
+    now = await req(port, "GET", "/api/state", { token: nir.token });
+    assert(now.json.state.employees.find(e => e.email === "shahar.eldar@cybereason.com").admin === false, "intentional toggle demoted shahar");
+    assert(now.json.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "nir still admin after that toggle");
+
+    const nirSelf = await req(port, "PUT", "/api/state", {
+      token: nir.token,
+      body: {
+        version: now.json.version,
+        state: JSON.parse(JSON.stringify(now.json.state)),
+        adminToggle: { email: "nir.itzik@cybereason.com", admin: false }
+      }
+    });
+    assert(nirSelf.status === 400 && nirSelf.json.error === "canonical_admin", "nir cannot demote himself");
+    cur = await req(port, "GET", "/api/state", { token: nir.token });
+    assert(cur.json.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "nir is still admin after the rejected self-toggle");
 
     const dup = JSON.parse(JSON.stringify(cur.json.state));
     dup.employees.push(Object.assign({}, dup.employees[0], { id: "e_dup" }));
@@ -380,6 +492,43 @@ async function main() {
     assert(emails.includes("nir.itzik@cybereason.com"), "nir still on the roster");
     assert(still.json.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "nir still admin");
     assert(still.json.rosterVersion === 1, "roster migration does not run again");
+  } finally {
+    await stopServer(server);
+  }
+
+  console.log("already-migrated store restores nir and ignores a stale demotion");
+  const healedDir = fs.mkdtempSync(path.join(os.tmpdir(), "shiftly-heal-"));
+  const healedPort = 38773;
+  const healed = fixtureState();
+  healed.rosterVersion = 1;
+  healed.version = 4;
+  healed.state.employees = [
+    { id: "nir1", name: "Nir Itzik", email: "nir.itzik@cybereason.com", admin: false, position: "Manager" },
+    { id: "sha", name: "Shahar Eldar", email: "shahar.eldar@cybereason.com", admin: true, position: "Shift worker" },
+    { id: "lot", name: "Lotan Hadad", email: "lotan.hadad@cybereason.com", admin: false, position: "Shift worker" }
+  ];
+  fs.writeFileSync(path.join(healedDir, "state.json"), JSON.stringify(healed));
+  server = await startServer(healedPort, healedDir);
+  try {
+    const nirH = await enroll(healedPort, "nir.itzik@cybereason.com");
+    const got = await req(healedPort, "GET", "/api/state", { token: nirH.token });
+    assert(got.status === 200, "healed store is readable");
+    assert(got.json.rosterVersion === 1, "healing does not re-run roster migration");
+    assert(!got.json.state.employees.some(e => e.email === "alex.rivlis@cybereason.com"), "healing does not re-add people");
+    assert(got.json.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "boot restores nir after a stored demotion");
+    assert(got.json.state.employees.find(e => e.email === "shahar.eldar@cybereason.com").admin === true, "boot leaves other admins alone");
+    assert(got.json.version === 5, "restoring nir bumps the version so open tabs refresh");
+    const again = JSON.parse(JSON.stringify(got.json.state));
+    again.employees.forEach(e => { e.admin = false; });
+    const put = await req(healedPort, "PUT", "/api/state", {
+      token: nirH.token, body: { version: got.json.version, state: again }
+    });
+    assert(put.status === 200, "stale demotion of a healed store still saves");
+    const after = await req(healedPort, "GET", "/api/state", { token: nirH.token });
+    assert(after.json.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "PUT cannot demote restored nir");
+    assert(after.json.state.employees.find(e => e.email === "shahar.eldar@cybereason.com").admin === true, "PUT cannot demote the other admin with a stale roster");
+    const onDisk = JSON.parse(fs.readFileSync(path.join(healedDir, "state.json"), "utf8"));
+    assert(onDisk.state.employees.find(e => e.email === "nir.itzik@cybereason.com").admin === true, "persisted file keeps nir admin");
   } finally {
     await stopServer(server);
   }
