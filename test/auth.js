@@ -183,6 +183,7 @@ async function main() {
     assert(emp && emp.admin === admin, "seed " + email + " admin=" + admin);
   });
   assert(!html.includes("niritzik23@gmail.com"), "seed html has no legacy gmail admin");
+  assert(/const banner = \(localOnly && !runtime && !serverMode\)/.test(html), "preview banner only when storage is local-only");
   assert(!html.includes("Request access"), "sign-in has no request-access step");
   assert(!html.includes("registerWorker"), "open self-register helper is gone");
 
