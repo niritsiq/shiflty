@@ -4,6 +4,10 @@ Shift scheduling for Cybereason. Workers submit weekly availability. Admins buil
 
 The app is [`index.html`](index.html) plus a small sync server, [`server.js`](server.js). With the server running, the team shares one roster and one schedule. Opening the HTML file on its own is a local preview (data stays in that browser).
 
+The live app is [shiflty.onrender.com](https://shiflty.onrender.com). Render serves the root `index.html` through `server.js`.
+
+[GitHub Pages](https://niritsiq.github.io/shiflty/) is a splash only, in [`docs/index.html`](docs/index.html). It tells visitors this URL is the old demo and sends them to Render. In the repo, set **Settings → Pages** to branch `main` and folder `/docs`. Do not point Pages at the repository root — that file is the app. Keep `docs/` in git; it is the Pages site.
+
 ## Sign-in
 
 Sign-in is email, then a 6-digit code from **Google Authenticator** (TOTP, RFC 6238, 30-second window). There is no Google Workspace SSO in v1.
