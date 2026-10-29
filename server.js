@@ -21,16 +21,28 @@
      POST /api/auth/reset  {email}    -> 200 (admin session) — clears that user's authenticator
      POST /api/auth/request|approve|decline, GET /api/auth/requests
                                       -> 403 join_closed
-     GET  /api/state                  -> {version, state}            (session)
-     PUT  /api/state {version, state, adminToggle?}
+     GET  /api/state[?channel=]       -> {version, state}            (session)
+                                      When channels[] is empty this is the whole
+                                      roster (v1). When channels exist, the body
+                                      is scoped to one team the caller belongs to
+                                      ({scoped:true, channelId}) — never another team.
+     PUT  /api/state[?channel=] {version, state, adminToggle?}
                                       -> {ok, version, employees} | 409 current (session)
-                                         Admin flags inside state are ignored.
-                                         adminToggle {email, admin:boolean} is the Team button.
-                                         400 canonical_admin — nir.itzik stays admin
-                                         400 self_demotion — that admin cannot clear their own flag
+                                      With stored channels, ?channel= is required
+                                      and the write merges that team only.
+                                      Admin flags inside state are ignored.
+                                      adminToggle {email, admin:boolean} is the Team button.
+                                      400 canonical_admin — nir.itzik stays admin
+                                      400 self_demotion — that admin cannot clear their own flag
+     GET  /api/channels               -> {channels:[{id,name,role,memberIds,implicit,default}]}
+     GET  /api/notifications[?channel=] -> {notifications:[]}
+     POST /api/notifications/read     -> {all:true} | {ids:[]} marks read, returns the list
+     POST /api/notifications/:id/read -> mark one read
 
-   state.notifications and state.channels are reserved arrays (empty in v1)
-   so a later notifications feature can append to them without a new store.
+   STUB: /api/channels and /api/notifications read and write
+   state.notifications and state.channels in the same store (JSON or
+   shiftly_kv). Developer 1 replaces that persistence. Same Bearer session
+   as the rest of the API. Schedule saves do not overwrite those arrays.
 
    AUTH_MOCK=1 skips the authenticator step (local demos only). Real TOTP
    is required when that variable is unset.
@@ -225,7 +237,7 @@ function isRosterEmail(email) {
 function ensureReservedArrays(state) {
   if (!state || typeof state !== "object") return false;
   let changed = false;
-  /* Reserved for a later notifications feature. Items are not defined in v1. */
+  /* Notification and channel items are defined next to the /api/notifications routes. */
   if (!Array.isArray(state.notifications)) { state.notifications = []; changed = true; }
   if (!Array.isArray(state.channels)) { state.channels = []; changed = true; }
   if (!Array.isArray(state.employees)) { state.employees = []; changed = true; }
@@ -512,9 +524,322 @@ function rejectJoin(res) {
   return json(res, 403, { error: "join_closed" });
 }
 
+/* ---------- channels + notifications (stub) ----------
+   Developer 1: replace the store.state reads/writes below with Supabase
+   (shiftly_kv or tables). Keep the JSON shapes and the session check.
+   Do not add a second sign-in. */
+const NOTIFICATION_TYPES = new Set(["schedule_published", "swap_request", "availability_reminder", "open_shift"]);
+
+function storedChannels() {
+  const list = store.state && store.state.channels;
+  if (!Array.isArray(list)) return [];
+  return list.filter(c => c && typeof c.id === "string" && c.id && Array.isArray(c.memberIds));
+}
+function legacyChannelId(channels) {
+  const marked = (channels || []).find(c => c && (c.default || c.id === "ch_default"));
+  return marked ? marked.id : (channels && channels[0] ? channels[0].id : "ch_default");
+}
+function channelsFor(emp) {
+  const stored = storedChannels();
+  if (!stored.length) {
+    const memberIds = (store.state.employees || []).filter(e => e && e.id && !e.pending).map(e => e.id);
+    return [{
+      id: "ch_default",
+      name: (store.state.settings && store.state.settings.company) || "Cybereason",
+      memberIds,
+      implicit: true,
+      default: true
+    }];
+  }
+  return stored.filter(ch => ch.memberIds.includes(emp.id)).map(ch => ({
+    id: ch.id,
+    name: String(ch.name || "Team"),
+    memberIds: ch.memberIds.slice(),
+    implicit: false,
+    default: !!(ch.default || ch.id === "ch_default")
+  }));
+}
+function channelsPayload(emp) {
+  return {
+    channels: channelsFor(emp).map(c => ({
+      id: c.id,
+      name: c.name,
+      role: emp.admin ? "admin" : "member",
+      memberIds: c.memberIds,
+      implicit: !!c.implicit,
+      default: !!c.default
+    }))
+  };
+}
+function weekBelongs(key, wk, channel, legacyHome) {
+  if (!wk || typeof wk !== "object") return false;
+  if (wk.channelId) return wk.channelId === channel.id;
+  if (typeof key === "string" && key.indexOf("|") >= 0) return key.indexOf(channel.id + "|") === 0;
+  return channel.id === legacyHome;
+}
+function scopeState(channel) {
+  const members = new Set(channel.memberIds);
+  const legacyHome = legacyChannelId(storedChannels());
+  const employees = (store.state.employees || []).filter(e => e && members.has(e.id));
+  const weeks = {};
+  for (const [k, wk] of Object.entries(store.state.weeks || {})) {
+    if (weekBelongs(k, wk, channel, legacyHome)) weeks[k] = wk;
+  }
+  const live = storedChannels().find(c => c.id === channel.id);
+  return {
+    settings: store.state.settings,
+    employees,
+    weeks,
+    notifications: [],
+    channels: live ? [{ id: live.id, name: live.name, memberIds: live.memberIds.slice(), default: !!live.default }] : []
+  };
+}
+/* What GET /api/state returns for this session.
+   No stored channels → the whole v1 document (callers and tests depend on that).
+   Stored channels → one team only. A roster member in no team gets themselves
+   and an empty schedule, not someone else's weeks. */
+function statePayload(sess, channelParam) {
+  const stored = storedChannels();
+  if (!stored.length) {
+    if (channelParam && channelParam !== "ch_default") {
+      return { status: 404, body: { error: "unknown_channel" } };
+    }
+    return { status: 200, body: store };
+  }
+  const mine = channelsFor(sess.emp);
+  if (!mine.length) {
+    return {
+      status: 200,
+      body: {
+        version: store.version,
+        rosterVersion: store.rosterVersion || ROSTER_VERSION,
+        channelId: null,
+        scoped: true,
+        state: {
+          settings: store.state.settings,
+          employees: [sess.emp],
+          weeks: {},
+          notifications: [],
+          channels: []
+        }
+      }
+    };
+  }
+  let ch = null;
+  if (!channelParam) ch = mine.find(c => c.default) || mine[0];
+  else {
+    ch = mine.find(c => c.id === channelParam);
+    if (!ch) {
+      const known = stored.some(c => c.id === channelParam);
+      return { status: known ? 403 : 404, body: { error: known ? "not_a_member" : "unknown_channel" } };
+    }
+  }
+  return {
+    status: 200,
+    body: {
+      version: store.version,
+      rosterVersion: store.rosterVersion || ROSTER_VERSION,
+      channelId: ch.id,
+      scoped: true,
+      state: scopeState(ch)
+    }
+  };
+}
+function notificationTitle(type) {
+  switch (type) {
+    case "schedule_published": return "Schedule published";
+    case "swap_request": return "Swap request";
+    case "availability_reminder": return "Availability reminder";
+    case "open_shift": return "Open shift";
+    default: return "Notification";
+  }
+}
+function visibleNotifications(emp) {
+  const mine = new Set(channelsFor(emp).map(c => c.id));
+  const implicit = !storedChannels().length;
+  const list = Array.isArray(store.state.notifications) ? store.state.notifications : [];
+  return list.filter(n => {
+    if (!n || typeof n !== "object" || !n.id || !NOTIFICATION_TYPES.has(n.type)) return false;
+    const recipients = Array.isArray(n.recipientIds) ? n.recipientIds : [];
+    if (recipients.length && !recipients.includes(emp.id) && !recipients.includes(emp.email)) return false;
+    if (n.channelId) {
+      if (!implicit && !mine.has(n.channelId)) return false;
+    } else if (!implicit && !recipients.length) {
+      return false;
+    }
+    return true;
+  });
+}
+function readAtFor(n, emp) {
+  if (n.readBy && typeof n.readBy === "object" && n.readBy[emp.id]) return n.readBy[emp.id];
+  return n.readAt || null;
+}
+function publicNotification(n, emp) {
+  let day = null;
+  if (Number.isInteger(n.dayIdx) && n.dayIdx >= 0 && n.dayIdx <= 6) day = n.dayIdx;
+  return {
+    id: String(n.id),
+    type: n.type,
+    title: String(n.title || notificationTitle(n.type)),
+    body: String(n.body || ""),
+    createdAt: n.createdAt || null,
+    readAt: readAtFor(n, emp),
+    channelId: n.channelId || null,
+    week: typeof n.week === "string" ? n.week : null,
+    dayIdx: day,
+    shiftId: n.shiftId || null
+  };
+}
+function notificationList(emp, channelParam) {
+  let rows = visibleNotifications(emp);
+  if (channelParam) {
+    const allowed = channelsFor(emp).some(c => c.id === channelParam);
+    if (!allowed) {
+      const known = storedChannels().some(c => c.id === channelParam);
+      return { status: known ? 403 : 404, body: { error: known ? "not_a_member" : "unknown_channel" } };
+    }
+    rows = rows.filter(n => !n.channelId || n.channelId === channelParam);
+  }
+  rows = rows.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  return { status: 200, body: { notifications: rows.map(n => publicNotification(n, emp)) } };
+}
+function markNotificationsRead(emp, ids, all) {
+  if (!all && !ids) return { status: 400, body: { error: "bad_request" } };
+  const want = ids ? new Set(ids.map(String)) : null;
+  const now = new Date().toISOString();
+  for (const n of visibleNotifications(emp)) {
+    if (readAtFor(n, emp)) continue;
+    if (!(all || want.has(String(n.id)))) continue;
+    if (!n.readBy || typeof n.readBy !== "object" || Array.isArray(n.readBy)) n.readBy = {};
+    n.readBy[emp.id] = now;
+  }
+  persistState();
+  return notificationList(emp, null);
+}
+function putFullState(sess, st, toggle) {
+  const seen = new Set();
+  for (const e of st.employees) {
+    if (!e || typeof e !== "object") return { status: 400, body: { error: "invalid_state" } };
+    const email = normalizeEmail(e.email);
+    if (!isRosterEmail(email)) return { status: 400, body: { error: "invalid_email", email: String(e.email || "") } };
+    if (seen.has(email)) return { status: 400, body: { error: "duplicate_email", email } };
+    seen.add(email);
+    e.email = email;
+  }
+  const guard = reconcileAdmins(st, sess, toggle);
+  if (guard) return { status: guard.status, body: { error: guard.error } };
+  if (!st.employees.some(e => e.admin && !e.pending)) return { status: 400, body: { error: "last_admin" } };
+  if (!sess.emp.admin && rosterSignature(st.employees) !== rosterSignature(store.state.employees)) {
+    return { status: 403, body: { error: "admin_required" } };
+  }
+  /* Schedule saves must not clobber mark-read or team membership. */
+  st.notifications = Array.isArray(store.state.notifications) ? store.state.notifications : [];
+  st.channels = Array.isArray(store.state.channels) ? store.state.channels : [];
+  store = { version: store.version + 1, state: st, rosterVersion: store.rosterVersion || ROSTER_VERSION };
+  persistState();
+  return { status: 200, body: { ok: true, version: store.version, employees: st.employees } };
+}
+function normalizeIncomingEmployee(raw) {
+  if (!raw || typeof raw !== "object") return { error: "invalid_state" };
+  const email = normalizeEmail(raw.email);
+  if (!isRosterEmail(email)) return { error: "invalid_email", email: String(raw.email || "") };
+  const rec = {
+    id: raw.id || ("e" + crypto.randomBytes(3).toString("hex")),
+    name: String(raw.name || "").trim() || email,
+    email,
+    admin: !!raw.admin,
+    position: raw.position || "Shift worker"
+  };
+  if (raw.pending) rec.pending = true;
+  return { rec };
+}
+function putChannelState(sess, channel, st, toggle) {
+  const stored = storedChannels();
+  const live = stored.find(c => c.id === channel.id);
+  if (!live) return { status: 404, body: { error: "unknown_channel" } };
+  if (st.employees.some(e => !e || typeof e !== "object")) return { status: 400, body: { error: "invalid_state" } };
+  /* Same admin rules as a full save: stale admin bits in the payload are
+     ignored, and adminToggle is the only intentional change. */
+  const guard = reconcileAdmins(st, sess, toggle);
+  if (guard) return { status: guard.status, body: { error: guard.error } };
+  const members = new Set(live.memberIds);
+  const legacyHome = legacyChannelId(stored);
+  const seen = new Set();
+  const incoming = [];
+  for (const raw of st.employees) {
+    const norm = normalizeIncomingEmployee(raw);
+    if (norm.error) return { status: 400, body: { error: norm.error, email: norm.email } };
+    if (seen.has(norm.rec.email)) return { status: 400, body: { error: "duplicate_email", email: norm.rec.email } };
+    seen.add(norm.rec.email);
+    incoming.push(norm.rec);
+  }
+  for (const e of store.state.employees || []) {
+    if (members.has(e.id)) continue;
+    const email = normalizeEmail(e.email);
+    if (seen.has(email)) return { status: 400, body: { error: "duplicate_email", email } };
+  }
+  const before = (store.state.employees || []).filter(e => members.has(e.id));
+  if (!sess.emp.admin && rosterSignature(before) !== rosterSignature(incoming)) {
+    return { status: 403, body: { error: "admin_required" } };
+  }
+
+  let nextEmployees = (store.state.employees || []).slice();
+  let nextMemberIds = live.memberIds.slice();
+  const removedIds = [];
+  if (sess.emp.admin) {
+    const incomingIds = new Set(incoming.map(e => e.id));
+    const elsewhere = new Set();
+    for (const c of stored) {
+      if (c.id === live.id) continue;
+      (c.memberIds || []).forEach(id => elsewhere.add(id));
+    }
+    const byId = new Map(nextEmployees.map(e => [e.id, Object.assign({}, e)]));
+    for (const rec of incoming) {
+      const prev = byId.get(rec.id);
+      const next = Object.assign({}, prev || {}, rec);
+      if (!rec.pending) delete next.pending;
+      byId.set(rec.id, next);
+    }
+    const ordered = [];
+    const kept = new Set();
+    for (const e of nextEmployees) {
+      const drop = members.has(e.id) && !incomingIds.has(e.id) && !elsewhere.has(e.id);
+      if (drop) { removedIds.push(e.id); continue; }
+      if (!byId.has(e.id)) continue;
+      ordered.push(byId.get(e.id));
+      kept.add(e.id);
+    }
+    for (const rec of incoming) {
+      if (!kept.has(rec.id) && byId.has(rec.id)) ordered.push(byId.get(rec.id));
+    }
+    nextEmployees = ordered;
+    nextMemberIds = incoming.map(e => e.id);
+    if (!nextEmployees.some(e => e.admin && !e.pending)) return { status: 400, body: { error: "last_admin" } };
+  }
+
+  const nextWeeks = Object.assign({}, store.state.weeks || {});
+  for (const [k, wk] of Object.entries(nextWeeks)) {
+    if (weekBelongs(k, wk, channel, legacyHome)) delete nextWeeks[k];
+  }
+  for (const [k, wk] of Object.entries(st.weeks || {})) {
+    if (!wk || typeof wk !== "object") continue;
+    if (!wk.channelId && channel.id !== legacyHome) wk.channelId = channel.id;
+    nextWeeks[k] = wk;
+  }
+  store.state.employees = nextEmployees;
+  store.state.weeks = nextWeeks;
+  store.state.settings = st.settings;
+  live.memberIds = nextMemberIds;
+  for (const id of removedIds) dropPersonId(store.state, id);
+  store.version += 1;
+  persistState();
+  return { status: 200, body: { ok: true, version: store.version, employees: incoming } };
+}
+
 /* ---------- server ---------- */
 const server = http.createServer(async (req, res) => {
-  const url = (req.url || "/").split("?")[0];
+  const reqUrl = new URL(req.url || "/", "http://127.0.0.1");
+  const url = reqUrl.pathname;
 
   try {
     if (url === "/api/config" && (req.method === "GET" || req.method === "HEAD")) {
@@ -590,26 +915,68 @@ const server = http.createServer(async (req, res) => {
       return res.end("ok " + (db ? "db" : "json"));
     }
 
+    /* STUB routes — same Bearer session as /api/state. See channelsPayload. */
+    if (url === "/api/channels" && req.method === "GET") {
+      const sess = requireSession(req);
+      if (!sess) return json(res, 401, { error: "auth_required" });
+      return json(res, 200, channelsPayload(sess.emp));
+    }
+
+    if (url === "/api/notifications" && req.method === "GET") {
+      const sess = requireSession(req);
+      if (!sess) return json(res, 401, { error: "auth_required" });
+      const listed = notificationList(sess.emp, reqUrl.searchParams.get("channel"));
+      return json(res, listed.status, listed.body);
+    }
+
+    if (url === "/api/notifications/read" && req.method === "POST") {
+      const sess = requireSession(req);
+      if (!sess) return json(res, 401, { error: "auth_required" });
+      const body = JSON.parse(await readBody(req) || "{}");
+      const all = body.all === true;
+      const ids = Array.isArray(body.ids) ? body.ids : null;
+      const marked = markNotificationsRead(sess.emp, ids, all);
+      return json(res, marked.status, marked.body);
+    }
+
+    const oneRead = url.match(/^\/api\/notifications\/([^/]+)\/read$/);
+    if (oneRead && req.method === "POST") {
+      const sess = requireSession(req);
+      if (!sess) return json(res, 401, { error: "auth_required" });
+      const marked = markNotificationsRead(sess.emp, [decodeURIComponent(oneRead[1])], false);
+      return json(res, marked.status, marked.body);
+    }
+
     if (url === "/api/state") {
       const sess = requireSession(req);
       if (!sess) return json(res, 401, { error: "auth_required" });
       healCanonicalAdmin();
-      if (req.method === "GET") return json(res, 200, store);
+      const channelParam = reqUrl.searchParams.get("channel");
+      if (req.method === "GET") {
+        const got = statePayload(sess, channelParam);
+        return json(res, got.status, got.body);
+      }
       if (req.method === "PUT") {
         const parsed = JSON.parse(await readBody(req) || "{}");
         const st = parsed.state;
         if (!st || !Array.isArray(st.employees) || !st.weeks || !st.settings) {
           return json(res, 400, { error: "invalid_state" });
         }
-        if (parsed.version !== store.version) return json(res, 409, store);
-        const seen = new Set();
-        for (const e of st.employees) {
-          if (!e || typeof e !== "object") return json(res, 400, { error: "invalid_state" });
-          const email = normalizeEmail(e.email);
-          if (!isRosterEmail(email)) return json(res, 400, { error: "invalid_email", email: String(e.email || "") });
-          if (seen.has(email)) return json(res, 400, { error: "duplicate_email", email });
-          seen.add(email);
-          e.email = email;
+        const stored = storedChannels();
+        let channel = null;
+        if (stored.length) {
+          if (!channelParam) return json(res, 400, { error: "channel_required" });
+          channel = channelsFor(sess.emp).find(c => c.id === channelParam) || null;
+          if (!channel) {
+            const known = stored.some(c => c.id === channelParam);
+            return json(res, known ? 403 : 404, { error: known ? "not_a_member" : "unknown_channel" });
+          }
+        } else if (channelParam && channelParam !== "ch_default") {
+          return json(res, 404, { error: "unknown_channel" });
+        }
+        if (parsed.version !== store.version) {
+          const cur = statePayload(sess, channelParam);
+          return json(res, 409, cur.body);
         }
         const toggle = parseAdminToggle(parsed.adminToggle);
         if (toggle && toggle.error) {
@@ -617,21 +984,8 @@ const server = http.createServer(async (req, res) => {
           if (toggle.email) body.email = toggle.email;
           return json(res, 400, body);
         }
-        const guard = reconcileAdmins(st, sess, toggle);
-        if (guard) return json(res, guard.status, { error: guard.error });
-        if (!st.employees.some(e => e.admin && !e.pending)) return json(res, 400, { error: "last_admin" });
-        if (!sess.emp.admin && rosterSignature(st.employees) !== rosterSignature(store.state.employees)) {
-          return json(res, 403, { error: "admin_required" });
-        }
-        if (!Array.isArray(st.notifications)) {
-          st.notifications = Array.isArray(store.state.notifications) ? store.state.notifications : [];
-        }
-        if (!Array.isArray(st.channels)) {
-          st.channels = Array.isArray(store.state.channels) ? store.state.channels : [];
-        }
-        store = { version: store.version + 1, state: st, rosterVersion: store.rosterVersion || ROSTER_VERSION };
-        persistState();
-        return json(res, 200, { ok: true, version: store.version, employees: st.employees });
+        const saved = channel ? putChannelState(sess, channel, st, toggle) : putFullState(sess, st, toggle);
+        return json(res, saved.status, saved.body);
       }
       res.writeHead(405); return res.end();
     }

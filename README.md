@@ -72,18 +72,44 @@ The client can see the flag without signing in:
 | 400 | `duplicate_email` | Two roster rows share an email |
 | 400 | `invalid_state` | Schedule payload is missing employees, weeks, or settings |
 | 400 | `bad_request` | Body was not valid JSON |
+| 400 | `channel_required` | Saved without `?channel=` after real channels exist |
+| 403 | `not_a_member` | Channel exists, but this session is not a member |
+| 404 | `unknown_channel` | Channel id is not in `state.channels` |
+
+## Notifications and teams
+
+The bell and the team switcher call these routes with the same `Authorization: Bearer` session as `/api/state`. They are stubbed in `server.js` on top of `state.notifications` and `state.channels` (JSON file or the `shiftly_kv` row). A schedule save does not overwrite those two arrays.
+
+Until `channels` has real rows, everyone on the roster is in one implicit team (`ch_default`, named from the company) and `GET /api/state` is still the whole document. A 404 from either route leaves the bell empty and the switcher on that one team.
+
+`GET /api/channels` → `{ channels: [{ id, name, role, memberIds, implicit, default }] }` — only teams this session belongs to. `role` is `admin` or `member` from the roster flag.
+
+`GET /api/notifications` → `{ notifications: [Notification] }`, newest first. Optional `?channel=` limits the list; a channel the caller is not in is `403`.
+
+`POST /api/notifications/read` with `{ "ids": ["n1"] }` or `{ "all": true }` sets that person's read time and returns the list. `POST /api/notifications/:id/read` marks one.
+
+Notification fields the bell reads:
+
+| Field | Notes |
+| --- | --- |
+| `id`, `type` | `type` is `schedule_published`, `swap_request`, `availability_reminder`, or `open_shift` |
+| `title`, `body`, `createdAt` | `createdAt` is ISO |
+| `readAt` | ISO or null, for this person (`readBy[employeeId]` in the store) |
+| `channelId` | Team to open. Omitted items are not broadcast across real teams |
+| `week` | Sunday `YYYY-MM-DD`. The bell jumps to that week |
+| `dayIdx`, `shiftId` | `dayIdx` is 0–6 (Sunday first). Together they scroll to the shift |
+
+Channel rows in `state.channels`: `{ id, name, memberIds, default? }`. A week with `channelId` belongs to that team. A week with no `channelId` stays on the default team (the row with `default: true`, or `ch_default`, or the first row). `GET /api/state` with stored channels returns only the caller's team (`scoped: true`, `channelId`). `PUT /api/state?channel=` merges that team's weeks and members and leaves every other team in place.
 
 ## State shape
 
 Shared state (`state` inside `state.json`, or the `state` key in Postgres) includes:
 
-- `employees` — the allowlist. A normal save does not change who is an admin. The Team button sends `adminToggle: { email, admin }` on `PUT /api/state`. `nir.itzik@cybereason.com` stays an admin. An admin cannot clear their own flag.
+- `employees` — the allowlist. A normal save does not change who is an admin, including a save scoped with `?channel=`. The Team button sends `adminToggle: { email, admin }` on that same PUT. `nir.itzik@cybereason.com` stays an admin. An admin cannot clear their own flag.
 - `weeks` — availability and published schedules
 - `settings` — shifts and staffing
-- `notifications` — reserved, always an array (empty in v1)
-- `channels` — reserved, always an array (empty in v1)
-
-Later notification work can append to those arrays without a new top-level store. Item shape is not defined yet.
+- `notifications` — items for the bell (empty until something writes one)
+- `channels` — closed teams (empty means one implicit team, the current roster)
 
 ## Run
 
@@ -102,4 +128,4 @@ Useful environment variables:
 - `SHIFTLY_DATA_DIR` — where `state.json`, `auth.json`, and `reminders-sent.json` go. Defaults to `/data` when that directory exists, otherwise the app directory. Those files are gitignored; do not commit them.
 - `SMTP_USER`, `SMTP_PASS` — availability reminder email. Optional `SMTP_HOST`, `SMTP_PORT`, `APP_URL`, `REMINDER_TZ`.
 
-`node test/auth.js` checks the email rule, TOTP, the closed join routes, and the seeded roster.
+`node test/auth.js` checks the email rule, TOTP, the closed join routes, and the seeded roster. `node test/notifications.js` checks the bell routes and that one team cannot read another.
