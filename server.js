@@ -41,12 +41,16 @@
      GET  /api/me/home[?channel=]     -> home stats for this session (see README)
                                       Same Bearer token. Weeks, shift lengths, and
                                       notifications already in state. No second login.
+     POST /api/mail/smoke             -> admin session. One Resend test message
+                                      to that admin's roster email.
+                                      {ok:true, id} or {ok:false, status, name, message}
 
    Publishing: an admin save that flips a week to published stores
    publishedBy {id, name, email} and publishedAt on that week, and appends
-   a schedule_published notification naming them. A worker save cannot
+   one schedule_published notification naming them (actor). That same
+   publish is emailed once per active roster member. A worker save cannot
    change published or those fields. A later save that leaves the week
-   published keeps the original actor.
+   published keeps the original actor and does not email again.
 
    STUB: /api/channels and /api/notifications read and write
    state.notifications and state.channels in the same store (JSON or
@@ -56,7 +60,10 @@
    Availability reminders are in-app rows on state.notifications
    (type availability_reminder). The process itself fires Sunday 09:00,
    Sunday 17:00, and Monday 09:00 Asia/Jerusalem, and catches up on boot.
-   No email is sent.
+   The same rows are emailed through Resend (HTTPS) when RESEND_API_KEY
+   and RESEND_FROM are both set. Publishing a week does the same for
+   schedule_published. POST /api/mail/smoke (admin session) sends one
+   test message to that admin's roster email.
 
    AUTH_MOCK=1 skips the authenticator step (local demos only). Real TOTP
    is required when that variable is unset.
@@ -71,6 +78,7 @@ const path = require("path");
 const crypto = require("crypto");
 const reminders = require("./reminders");
 const home = require("./home");
+const mail = require("./mail");
 
 const PORT = process.env.PORT || 3000;
 /* Real Google Authenticator codes are required unless AUTH_MOCK=1. */
@@ -730,10 +738,15 @@ function publishRow(ev) {
   return row;
 }
 function recordPublishEvents(events) {
-  if (!events || !events.length) return;
-  if (!store.state) return;
+  if (!events || !events.length || !store.state) return [];
   if (!Array.isArray(store.state.notifications)) store.state.notifications = [];
-  for (const ev of events) store.state.notifications.push(publishRow(ev));
+  const rows = [];
+  for (const ev of events) {
+    const row = publishRow(ev);
+    store.state.notifications.push(row);
+    rows.push(row);
+  }
+  return rows;
 }
 function homeChannelFilter(emp, channelParam) {
   const stored = storedChannels();
@@ -791,13 +804,14 @@ function putFullState(sess, st, toggle) {
   }
   const publishedAt = new Date().toISOString();
   const events = home.attributePublishes(store.state.weeks, st.weeks, sess.emp, publishedAt, storedChannels());
-  recordPublishEvents(events);
+  const publishedRows = recordPublishEvents(events);
   /* Schedule saves must not clobber mark-read or team membership. */
   st.notifications = Array.isArray(store.state.notifications) ? store.state.notifications : [];
   st.channels = Array.isArray(store.state.channels) ? store.state.channels : [];
   store = { version: store.version + 1, state: st, rosterVersion: store.rosterVersion || ROSTER_VERSION };
+  const mailJobs = publishMailJobs(events, publishedRows, null);
   persistState();
-  return { status: 200, body: { ok: true, version: store.version, employees: st.employees } };
+  return { status: 200, body: { ok: true, version: store.version, employees: st.employees }, mailJobs };
 }
 function normalizeIncomingEmployee(raw) {
   if (!raw || typeof raw !== "object") return { error: "invalid_state" };
@@ -877,7 +891,8 @@ function putChannelState(sess, channel, st, toggle) {
     if (!nextEmployees.some(e => e.admin && !e.pending)) return { status: 400, body: { error: "last_admin" } };
   }
 
-  const nextWeeks = Object.assign({}, store.state.weeks || {});
+  const prevWeeks = store.state.weeks || {};
+  const nextWeeks = Object.assign({}, prevWeeks);
   for (const [k, wk] of Object.entries(nextWeeks)) {
     if (weekBelongs(k, wk, channel, legacyHome)) delete nextWeeks[k];
   }
@@ -892,7 +907,7 @@ function putChannelState(sess, channel, st, toggle) {
     new Date().toISOString(),
     stored
   );
-  recordPublishEvents(events);
+  const publishedRows = recordPublishEvents(events);
   for (const [k, wk] of Object.entries(st.weeks || {})) {
     if (!wk || typeof wk !== "object") continue;
     nextWeeks[k] = wk;
@@ -902,9 +917,13 @@ function putChannelState(sess, channel, st, toggle) {
   store.state.settings = st.settings;
   live.memberIds = nextMemberIds;
   for (const id of removedIds) dropPersonId(store.state, id);
+  const mailJobs = publishMailJobs(events, publishedRows, {
+    id: live.id,
+    memberIds: live.memberIds
+  });
   store.version += 1;
   persistState();
-  return { status: 200, body: { ok: true, version: store.version, employees: incoming } };
+  return { status: 200, body: { ok: true, version: store.version, employees: incoming }, mailJobs };
 }
 
 /* ---------- server ---------- */
@@ -1026,6 +1045,45 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, home.buildHome(store.state, sess.emp, homeClock(), { channelId: filter.channelId }));
     }
 
+    /* Admin-only. One message to the signed-in admin's roster email.
+       The address comes from the session, not the body. */
+    if (url === "/api/mail/smoke" && req.method === "POST") {
+      const sess = requireSession(req);
+      if (!sess) return json(res, 401, { error: "auth_required" });
+      if (!sess.emp.admin) return json(res, 403, { error: "admin_required" });
+      await readBody(req);
+      const missing = mail.missingConfig();
+      if (missing) {
+        console.log("[mail] smoke skipped; " + missing + " is unset");
+        return json(res, 400, {
+          ok: false,
+          status: 400,
+          name: "missing_config",
+          message: missing + " is unset"
+        });
+      }
+      let result;
+      try {
+        result = await mail.sendResendEmail({
+          to: sess.emp.email,
+          subject: "Shiftly test email",
+          text: mail.withLink("This is a Shiftly test email to " + sess.emp.email + ".")
+        });
+      } catch (err) {
+        const message = mail.redact(err && err.message ? err.message : "request failed");
+        console.error("[mail] smoke failed:", message);
+        return json(res, 502, { ok: false, status: 502, name: "network_error", message });
+      }
+      if (result.ok) return json(res, 200, { ok: true, id: result.id });
+      const status = result.status >= 400 && result.status <= 599 ? result.status : 502;
+      return json(res, status, {
+        ok: false,
+        status: result.status || status,
+        name: result.name || "resend_error",
+        message: result.message || "Resend rejected the message"
+      });
+    }
+
     if (url === "/api/state") {
       const sess = requireSession(req);
       if (!sess) return json(res, 401, { error: "auth_required" });
@@ -1064,6 +1122,13 @@ const server = http.createServer(async (req, res) => {
           return json(res, 400, body);
         }
         const saved = channel ? putChannelState(sess, channel, st, toggle) : putFullState(sess, st, toggle);
+        if (saved.status === 200 && saved.mailJobs && saved.mailJobs.length) {
+          try {
+            await mail.deliverJobs(saved.mailJobs, "schedule", persistState);
+          } catch (err) {
+            console.error("[mail] schedule send failed:", mail.redact(err && err.message ? err.message : err));
+          }
+        }
         return json(res, saved.status, saved.body);
       }
       res.writeHead(405); return res.end();
@@ -1081,13 +1146,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-/* ---------- availability reminders (in-app) ----------
+/* ---------- availability reminders ----------
    Three slots in Asia/Jerusalem for the week that locks Monday 10:00:
    Sunday 09:00, Sunday 17:00, Monday 09:00. Caught up on boot when the
-   free instance was asleep. The notification id is the sent marker.
-   REMINDER_NOW (ISO) freezes the clock for tests. REMINDER_DISABLE=1
-   skips the pass. Outbound mail is not sent; a later Resend hook can
-   read the same availability_reminder rows. */
+   free instance was asleep. The notification id is the in-app marker.
+   emailAttemptedAt on that row is the email marker (one send per person,
+   per slot, per week). REMINDER_NOW (ISO) freezes the clock for tests.
+   REMINDER_DISABLE=1 skips the pass. */
 function reminderClock() {
   if (process.env.REMINDER_NOW) {
     const frozen = new Date(process.env.REMINDER_NOW);
@@ -1103,23 +1168,147 @@ function homeClock() {
   }
   return new Date();
 }
-function runAvailabilityReminders(now) {
-  if (!store || !store.state) return;
-  const result = reminders.applyAvailabilityReminders(store.state, now, { isRosterEmail });
-  if (!result.created) return;
-  store.version = (store.version || 0) + 1;
-  persistState();
-  console.log("[reminder] in-app", result.created, "week", result.weekKey, result.slots.join(","));
+function rosterRecipients(employees, memberIds) {
+  const members = memberIds ? new Set(memberIds) : null;
+  const seen = new Set();
+  const out = [];
+  for (const emp of employees || []) {
+    if (!emp || !emp.id || emp.pending) continue;
+    if (members && !members.has(emp.id)) continue;
+    const email = normalizeEmail(emp.email);
+    if (!isRosterEmail(email)) continue;
+    if (seen.has(email)) continue;
+    seen.add(email);
+    out.push({ emp, email });
+  }
+  return out;
 }
-function startAvailabilityReminders() {
+/* One mail job per active member, all stamped on the single publish row. */
+function publishMailJobs(events, rows, scope) {
+  const jobs = [];
+  const channels = storedChannels();
+  for (let i = 0; i < (events || []).length; i++) {
+    const ev = events[i];
+    const row = rows && rows[i];
+    if (!ev || !row || row.emailedAt || row.emailAttemptedAt) continue;
+    if (scope && ev.channelId && ev.channelId !== scope.id) continue;
+    let memberIds = scope ? scope.memberIds : null;
+    if (!memberIds && ev.channelId && channels.length) {
+      const ch = channels.find(c => c.id === ev.channelId);
+      if (!ch) continue;
+      memberIds = ch.memberIds;
+    }
+    for (const person of rosterRecipients(store.state.employees, memberIds)) {
+      jobs.push({
+        row,
+        to: person.email,
+        subject: String(row.title || "Schedule published"),
+        text: mail.withLink(String(row.body || ""))
+      });
+    }
+  }
+  return jobs;
+}
+function reminderJobs(rows) {
+  const jobs = [];
+  for (const row of rows) {
+    const empId = row.recipientIds && row.recipientIds[0];
+    const emp = (store.state.employees || []).find(e => e && e.id === empId);
+    if (!emp) continue;
+    const to = normalizeEmail(emp.email);
+    if (!to) continue;
+    jobs.push({
+      row,
+      to,
+      subject: String(row.title || "Availability reminder"),
+      text: mail.withLink(String(row.body || ""))
+    });
+  }
+  return jobs;
+}
+function weekDateKey(key) {
+  const m = /(\d{4}-\d{2}-\d{2})$/.exec(String(key || ""));
+  return m ? m[1] : null;
+}
+function weekStillPublished(row) {
+  const channels = storedChannels();
+  const legacy = channels.length ? legacyChannelId(channels) : null;
+  for (const [key, wk] of Object.entries((store.state && store.state.weeks) || {})) {
+    if (!wk || wk.published !== true) continue;
+    if (weekDateKey(key) !== row.week) continue;
+    let cid = typeof wk.channelId === "string" && wk.channelId ? wk.channelId : null;
+    if (!cid) {
+      const pipe = String(key).indexOf("|");
+      if (pipe >= 0) cid = String(key).slice(0, pipe);
+      else if (legacy && row.channelId) cid = legacy;
+    }
+    if ((cid || null) !== (row.channelId || null)) continue;
+    return true;
+  }
+  return false;
+}
+/* A publish that could not send (key or From missing) is tried on the next
+   reminder pass. emailAttemptedAt on that one row blocks a second copy. */
+function pendingPublishJobs() {
+  const jobs = [];
+  for (const row of (store.state && store.state.notifications) || []) {
+    if (!row || row.type !== "schedule_published") continue;
+    if (row.emailedAt || row.emailAttemptedAt) continue;
+    if (!weekStillPublished(row)) continue;
+    const explicit = Array.isArray(row.recipientIds) && row.recipientIds.length ? row.recipientIds : null;
+    let memberIds = null;
+    if (row.channelId && storedChannels().length) {
+      const ch = storedChannels().find(c => c.id === row.channelId);
+      if (!ch) continue;
+      memberIds = ch.memberIds;
+    }
+    for (const person of rosterRecipients(store.state.employees, memberIds)) {
+      if (explicit && !explicit.includes(person.emp.id) && !explicit.includes(person.email)) continue;
+      jobs.push({
+        row,
+        to: person.email,
+        subject: String(row.title || "Schedule published"),
+        text: mail.withLink(String(row.body || ""))
+      });
+    }
+  }
+  return jobs;
+}
+let reminderRunning = false;
+async function runAvailabilityReminders(now) {
+  if (reminderRunning || !store || !store.state) return;
+  reminderRunning = true;
+  try {
+    const result = reminders.applyAvailabilityReminders(store.state, now, { isRosterEmail });
+    if (result.created) {
+      store.version = (store.version || 0) + 1;
+      persistState();
+      console.log("[reminder] in-app", result.created, "week", result.weekKey, result.slots.join(","));
+    }
+    const pending = reminders.pendingReminderEmails(store.state, result, isRosterEmail);
+    await mail.deliverJobs(reminderJobs(pending), "reminder", persistState);
+    await mail.deliverJobs(pendingPublishJobs(), "schedule", persistState);
+  } catch (err) {
+    console.error("[reminder] pass failed:", mail.redact(err && err.message ? err.message : err));
+  } finally {
+    reminderRunning = false;
+  }
+}
+async function startAvailabilityReminders() {
   if (process.env.REMINDER_DISABLE === "1") {
     console.log("[reminder] disabled");
     return;
   }
-  runAvailabilityReminders(reminderClock());
+  await runAvailabilityReminders(reminderClock());
   /* A frozen clock is a single catch-up. The live process checks once a minute
      while it is awake; a cold start covers the slots it slept through. */
-  if (!process.env.REMINDER_NOW) setInterval(() => runAvailabilityReminders(new Date()), 60000);
+  if (!process.env.REMINDER_NOW) {
+    setInterval(() => {
+      runAvailabilityReminders(new Date()).catch(err => {
+        console.error("[reminder] pass failed:", mail.redact(err && err.message ? err.message : err));
+      });
+    }, 60000);
+  }
 }
 
 (async () => {
@@ -1144,9 +1333,11 @@ function startAvailabilityReminders() {
   }
   applyRosterMigration();
   applyAuthPolicy();
-  startAvailabilityReminders();
+  await startAvailabilityReminders();
+  const mailNote = mail.statusLine();
   server.listen(PORT, () => console.log("Shiftly server listening on :" + PORT +
     " | storage: " + (dbMode ? "PostgreSQL (json backup: " + DATA_DIR + ")" : "JSON files (" + DATA_DIR + ") — set DATABASE_URL for PostgreSQL") +
     " | auth: " + (AUTH_MOCK ? "MOCK (AUTH_MOCK=1, authenticator skipped)" : "TOTP") +
-    " | reminders: in-app " + reminders.REMINDER_TZ + " Sun 09:00, Sun 17:00, Mon 09:00"));
+    " | reminders: " + reminders.REMINDER_TZ + " Sun 09:00, Sun 17:00, Mon 09:00" +
+    " | " + mailNote));
 })();

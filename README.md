@@ -186,6 +186,22 @@ Useful environment variables:
 - `PORT` — listen port.
 - `DATABASE_URL` — Postgres. Without it, the server stores JSON files.
 - `SHIFTLY_DATA_DIR` — where `state.json` and `auth.json` go. Defaults to `/data` when that directory exists, otherwise the app directory. Those files are gitignored; do not commit them. `reminders-sent.json` is an old email ledger and is no longer written.
+- `RESEND_API_KEY` — required to send email. The server reads `process.env.RESEND_API_KEY` and never logs it. Already set on the Render web service. If it is unset, email is skipped and in-app notifications still save.
+- `RESEND_FROM` — required to send email. The From header, read only from `process.env.RESEND_FROM`. There is no default. If it is unset, email is skipped (the log says `RESEND_FROM is unset`) and in-app notifications still save. On the Render web service this is set to `Shiflty <onboarding@resend.dev>`.
+- `APP_URL` — optional. When it is an `http` or `https` URL, reminder and publish emails append it as a link.
+
+## Email (Resend)
+
+Outbound mail uses Resend’s HTTPS API (`POST https://api.resend.com/emails`), not SMTP. Render’s free tier blocks SMTP. No extra npm mail package.
+
+Two messages:
+
+1. **Availability reminders** — the same people who get the in-app `availability_reminder` rows, with the same skips (already submitted, pending, a non-roster address, a duplicate address, a week an admin closed). Three slots, Asia/Jerusalem: Sunday 09:00, Sunday 17:00, Monday 09:00. A wake can catch up slots that already passed. Each person gets at most one email per slot per week. The marker is `emailAttemptedAt` on that notification row (next to the notification id), in the same JSON file or Postgres row as the rest of the state.
+2. **Schedule published** — when an admin’s save flips a week to `published`, that week stores `publishedBy` and `publishedAt`, and one `schedule_published` bell row names the admin (`actor`). Each active roster member of that team gets one email. A later save that leaves the week published does not send again. `emailAttemptedAt` on that bell row is the marker. Unpublishing and publishing again is a new publish, so it emails once more.
+
+`onboarding@resend.dev` can only deliver to the Resend account owner until a custom domain is verified. The server still addresses each worker. If Resend rejects a message, the log has the HTTP status, the error `name`, and the `message`. The API key is not logged. That row is not retried.
+
+`POST /api/mail/smoke` with an admin’s bearer token sends one test email to that admin’s roster email (the session, not a body field). The response is `{ "ok": true, "id": "..." }` or `{ "ok": false, "status": 403, "name": "...", "message": "..." }` from Resend. A worker gets `403 admin_required`. Each call sends one message.
 
 ## Availability reminders
 
@@ -197,8 +213,8 @@ Three in-app reminders per person per submission week, in Asia/Jerusalem, and on
 
 The Sunday 20:00 email slot is gone. Pending people are skipped. Admins are included, because My availability lets them submit. An admin who closed the week (`locked`, and not reopened) suppresses that week's reminders.
 
-The existing web process schedules this. There is no Render cron job. The free instance sleeps, so a boot catches up any of the three slots whose time has already passed in the current cycle (from Sunday 09:00 until the next Sunday 09:00, including after Monday 10:00 if the process was down). Each person gets one reminder per week per slot. The marker is the notification id in `state.notifications`, in the same JSON file or Postgres row as the rest of the state, so a redeploy does not write it again.
+The existing web process schedules this. There is no Render cron job. The free instance sleeps, so a boot catches up any of the three slots whose time has already passed in the current cycle (from Sunday 09:00 until the next Sunday 09:00, including after Monday 10:00 if the process was down). Each person gets one in-app reminder per week per slot. The marker is the notification id in `state.notifications`, in the same JSON file or Postgres row as the rest of the state, so a redeploy does not write it again.
 
-Nothing is emailed. The rows use `type: "availability_reminder"` (`title`, `body`, `createdAt`, `week`, `recipientIds`, `readBy`, and `channelId` when the week belongs to a real team). A later mail provider can read those rows; this version does not open a mail connection.
+The rows use `type: "availability_reminder"` (`title`, `body`, `createdAt`, `week`, `recipientIds`, `readBy`, `slot`, and `channelId` when the week belongs to a real team). Email for those rows is described above.
 
-`node test/auth.js` checks the email rule, TOTP, the closed join routes, and the seeded roster. `node test/notifications.js` checks the bell routes and that one team cannot read another. `node test/reminders.js` checks the three Jerusalem slots, skip-if-submitted, catch-up without duplicates, and that no mail is sent. `node test/home.js` checks the home hour rules (Israel week, scheduled month, actual = already ended, no clock-in) and that publishing records who did it.
+`node test/auth.js` checks the email rule, TOTP, the closed join routes, and the seeded roster. `node test/notifications.js` checks the bell routes and that one team cannot read another. `node test/reminders.js` checks the three Jerusalem slots, skip-if-submitted, and catch-up without duplicate bell rows. `node test/home.js` checks the home hour rules (Israel week, scheduled month, actual = already ended, no clock-in) and that publishing records who did it. `node test/mail.js` checks Resend with a mocked API: a reminder is attempted once, a submitted person is skipped, a missing API key skips the send, a publish email fires once, and the admin smoke route returns Resend’s result.
