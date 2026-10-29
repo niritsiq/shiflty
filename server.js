@@ -1,15 +1,32 @@
-/* Shiftly sync server with authenticator-app (TOTP) two-step sign-in.
-   Zero dependencies — Node's crypto does the TOTP math (RFC 6238).
+/* Shiftly sync server. Sign-in is email + Google Authenticator (TOTP, RFC 6238).
+   Zero dependencies for auth — Node's crypto does the TOTP math.
+
+   Who can sign in:
+     The email must be firstname.lastname@cybereason.com (lowercase letters,
+     exactly one dot in the local part) AND be on the team roster. Admins
+     add and remove people in the app. Open join / self-request is closed.
 
    API:
-     POST /api/auth/start  {email}        -> 200 {mode:"code"} | {mode:"enroll", secret, otpauth} | 404 not on team
-     POST /api/auth/verify {email, code}  -> 200 {token, email} | 401 bad code
-     POST /api/auth/reset  {email}        -> 200 (admin session required) — clears a user's authenticator
-     GET  /api/state                      -> 200 {version, state}   (session required)
-     PUT  /api/state {version, state}     -> 200 {ok, version} | 409 current   (session required)
+     GET  /api/config                 -> {authMock, totpRequired, emailRule}
+     GET  /api/health                 -> text "ok db|json" plus X-Auth-Mock: 0|1
+     POST /api/auth/start  {email}    -> {mode:"code"} | {mode:"enroll", secret, otpauth}
+                                        | {mode:"mock", token, email} when AUTH_MOCK=1
+                                        | 400 invalid_email | 403 not_on_team
+     POST /api/auth/verify {email, code} -> {token, email} | 401 bad_code | 400 no_enrollment
+     POST /api/auth/reset  {email}    -> 200 (admin session) — clears that user's authenticator
+     POST /api/auth/request|approve|decline, GET /api/auth/requests
+                                      -> 403 join_closed
+     GET  /api/state                  -> {version, state}            (session)
+     PUT  /api/state {version, state} -> {ok, version} | 409 current (session)
 
-   Storage (on /data when a Railway volume is mounted, else the app dir):
-     state.json — the shared app state (seeded from index.html on first boot)
+   state.notifications and state.channels are reserved arrays (empty in v1)
+   so a later notifications feature can append to them without a new store.
+
+   AUTH_MOCK=1 skips the authenticator step (local demos only). Real TOTP
+   is required when that variable is unset.
+
+   Storage (SHIFTLY_DATA_DIR, else /data when that directory exists, else the app dir):
+     state.json — shared app state (seeded from index.html on first boot)
      auth.json  — TOTP secrets + sessions (never sent to clients) */
 "use strict";
 const http = require("http");
@@ -19,14 +36,42 @@ const crypto = require("crypto");
 const tls = require("tls");
 
 const PORT = process.env.PORT || 3000;
-/* TEMPORARY: authenticator step is mocked — approved emails sign in without a
-   TOTP code. Set AUTH_MOCK=0 in the environment to turn real 2FA back on. */
-const AUTH_MOCK = process.env.AUTH_MOCK !== "0";
-const DATA_DIR = fs.existsSync("/data") ? "/data" : __dirname;
+/* Real Google Authenticator codes are required unless AUTH_MOCK=1. */
+const AUTH_MOCK = process.env.AUTH_MOCK === "1" || process.env.AUTH_MOCK === "true";
+const DATA_DIR = process.env.SHIFTLY_DATA_DIR
+  ? path.resolve(process.env.SHIFTLY_DATA_DIR)
+  : (fs.existsSync("/data") ? "/data" : __dirname);
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const STATE_FILE = path.join(DATA_DIR, "state.json");
 const AUTH_FILE = path.join(DATA_DIR, "auth.json");
 const INDEX = path.join(__dirname, "index.html");
 const SESSION_DAYS = 60;
+const ROSTER_VERSION = 1;
+const AUTH_POLICY = "totp-v1";
+/* firstname.lastname@cybereason.com — letters only, one dot, no plus-tags. */
+const ROSTER_EMAIL = /^[a-z]+\.[a-z]+@cybereason\.com$/;
+const LEGACY_ADMIN_EMAIL = "niritzik23@gmail.com";
+const EMAIL_RULE = "firstname.lastname@cybereason.com";
+
+/* Canonical v1 roster. Migration adds anyone missing once; admins may
+   remove people later without them being re-added on the next boot.
+   Nir is the admin. Privileges from niritzik23@gmail.com move here. */
+const SEED_EMPLOYEES = [
+  { id: "e_lotan_hadad", name: "Lotan Hadad", email: "lotan.hadad@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_avital_lioubchits", name: "Avital Lioubchits", email: "avital.lioubchits@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_gal_mamon", name: "Gal Mamon", email: "gal.mamon@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_matan_razon", name: "Matan Razon", email: "matan.razon@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_alon_shpilberg", name: "Alon Shpilberg", email: "alon.shpilberg@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_bar_belisha", name: "Bar Belisha", email: "bar.belisha@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_dana_balas", name: "Dana Balas", email: "dana.balas@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_dana_bardin", name: "Dana Bardin", email: "dana.bardin@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_ori_hai", name: "Ori Hai", email: "ori.hai@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_nir_itzik", name: "Nir Itzik", email: "nir.itzik@cybereason.com", admin: true, position: "Manager" },
+  { id: "e_alex_rivlis", name: "Alex Rivlis", email: "alex.rivlis@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_shoshana_avni", name: "Shoshana Avni", email: "shoshana.avni@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_ben_shalev", name: "Ben Shalev", email: "ben.shalev@cybereason.com", admin: false, position: "Shift worker" },
+  { id: "e_shahar_eldar", name: "Shahar Eldar", email: "shahar.eldar@cybereason.com", admin: false, position: "Shift worker" }
+];
 
 /* ---------- state store ---------- */
 function seedState() {
@@ -39,9 +84,9 @@ function seedState() {
 }
 
 /* ---------- database (Railway PostgreSQL via DATABASE_URL) ----------
-   Primary storage when DATABASE_URL is set; the JSON files on /data remain a
-   write-through backup and the fallback when no database is configured.
-   On first boot with a database, existing JSON data migrates automatically. */
+   Primary storage when DATABASE_URL is set; the JSON files on the data
+   dir remain a write-through backup and the fallback when no database
+   is configured. On first boot with a database, existing JSON migrates. */
 let db = null;
 async function initDb() {
   const url = process.env.DATABASE_URL;
@@ -119,18 +164,187 @@ function hotp(secretB32, counter) {
   return String(code).padStart(6, "0");
 }
 function totpCheck(secretB32, code) {
+  const want = String(code == null ? "" : code).replace(/\s+/g, "");
+  if (!/^\d{6}$/.test(want)) return false;
   const c = Math.floor(Date.now() / 30000);
-  const want = String(code).trim();
-  for (let w = -1; w <= 1; w++) if (hotp(secretB32, c + w) === want) return true;
-  return false;
+  const wantBuf = Buffer.from(want);
+  let ok = false;
+  for (let w = -1; w <= 1; w++) {
+    const got = Buffer.from(hotp(secretB32, c + w));
+    if (got.length === wantBuf.length && crypto.timingSafeEqual(got, wantBuf)) ok = true;
+  }
+  return ok;
+}
+
+/* ---------- roster ---------- */
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+function isRosterEmail(email) {
+  return ROSTER_EMAIL.test(normalizeEmail(email));
+}
+function ensureReservedArrays(state) {
+  if (!state || typeof state !== "object") return false;
+  let changed = false;
+  /* Reserved for a later notifications feature. Items are not defined in v1. */
+  if (!Array.isArray(state.notifications)) { state.notifications = []; changed = true; }
+  if (!Array.isArray(state.channels)) { state.channels = []; changed = true; }
+  if (!Array.isArray(state.employees)) { state.employees = []; changed = true; }
+  return changed;
+}
+function dropPersonId(state, id) {
+  if (!id || !state.weeks) return;
+  for (const wk of Object.values(state.weeks)) {
+    if (!wk || typeof wk !== "object") continue;
+    if (wk.submissions) delete wk.submissions[id];
+    if (!wk.assignments) continue;
+    for (const key of Object.keys(wk.assignments)) {
+      const list = wk.assignments[key];
+      if (!Array.isArray(list)) continue;
+      const next = list.filter(x => x !== id);
+      if (next.length) wk.assignments[key] = next;
+      else delete wk.assignments[key];
+    }
+  }
+}
+function submissionScore(sub) {
+  if (!sub) return 0;
+  if (sub.submittedAt) return 2;
+  if (sub.cells && Object.keys(sub.cells).length) return 1;
+  return 0;
+}
+function rewritePersonId(state, fromId, toId) {
+  if (!fromId || !toId || fromId === toId || !state.weeks) return;
+  for (const wk of Object.values(state.weeks)) {
+    if (!wk || typeof wk !== "object") continue;
+    if (wk.submissions && wk.submissions[fromId]) {
+      const src = wk.submissions[fromId];
+      const dst = wk.submissions[toId];
+      if (!dst || submissionScore(src) > submissionScore(dst)) wk.submissions[toId] = src;
+      delete wk.submissions[fromId];
+    }
+    if (!wk.assignments) continue;
+    for (const key of Object.keys(wk.assignments)) {
+      const list = wk.assignments[key];
+      if (!Array.isArray(list)) continue;
+      const next = [];
+      for (const id of list) {
+        const mapped = id === fromId ? toId : id;
+        if (!next.includes(mapped)) next.push(mapped);
+      }
+      if (next.length) wk.assignments[key] = next;
+      else delete wk.assignments[key];
+    }
+  }
+}
+function sweepUnknownIds(state) {
+  const ids = new Set((state.employees || []).map(e => e && e.id).filter(Boolean));
+  const weeks = state.weeks || {};
+  const seen = new Set();
+  for (const wk of Object.values(weeks)) {
+    if (!wk || typeof wk !== "object") continue;
+    if (wk.submissions) {
+      for (const id of Object.keys(wk.submissions)) if (!ids.has(id)) seen.add(id);
+    }
+    if (wk.assignments) {
+      for (const list of Object.values(wk.assignments)) {
+        if (Array.isArray(list)) list.forEach(id => { if (!ids.has(id)) seen.add(id); });
+      }
+    }
+  }
+  for (const id of seen) dropPersonId(state, id);
+}
+/* One-time allowlist migration. Later admin edits stick (rosterVersion). */
+function migrateRosterV1(state) {
+  const emps = Array.isArray(state.employees) ? state.employees : [];
+  const legacyWasAdmin = emps.some(e => e && normalizeEmail(e.email) === LEGACY_ADMIN_EMAIL && e.admin);
+  const kept = new Map();
+  for (const raw of emps) {
+    if (!raw) continue;
+    const email = normalizeEmail(raw.email);
+    if (!isRosterEmail(email)) {
+      if (raw.id) dropPersonId(state, raw.id);
+      continue;
+    }
+    const prev = kept.get(email);
+    if (!prev) {
+      const rec = {
+        id: raw.id || ("e" + crypto.randomBytes(3).toString("hex")),
+        name: String(raw.name || "").trim() || email,
+        email,
+        admin: !!raw.admin,
+        position: raw.position || "Shift worker"
+      };
+      if (raw.pending) rec.pending = true;
+      kept.set(email, rec);
+    } else {
+      if (raw.admin) prev.admin = true;
+      if (!raw.pending) delete prev.pending;
+      if (raw.id) rewritePersonId(state, raw.id, prev.id);
+    }
+  }
+  for (const seed of SEED_EMPLOYEES) {
+    const cur = kept.get(seed.email);
+    if (!cur) {
+      kept.set(seed.email, {
+        id: seed.id,
+        name: seed.name,
+        email: seed.email,
+        admin: !!seed.admin,
+        position: seed.position
+      });
+    } else {
+      cur.name = seed.name;
+      cur.email = seed.email;
+      if (!cur.position) cur.position = seed.position;
+      delete cur.pending;
+      if (seed.admin) cur.admin = true;
+    }
+  }
+  const nir = kept.get("nir.itzik@cybereason.com");
+  if (nir && legacyWasAdmin) nir.admin = true;
+  const seedEmails = new Set(SEED_EMPLOYEES.map(s => s.email));
+  const extras = [];
+  for (const [email, emp] of kept) {
+    if (!seedEmails.has(email)) extras.push(emp);
+  }
+  state.employees = SEED_EMPLOYEES.map(s => kept.get(s.email)).concat(extras);
+  sweepUnknownIds(state);
+}
+function applyRosterMigration() {
+  if (!store || !store.state) return;
+  const arraysChanged = ensureReservedArrays(store.state);
+  let migrated = false;
+  if ((store.rosterVersion || 0) < ROSTER_VERSION) {
+    migrateRosterV1(store.state);
+    store.rosterVersion = ROSTER_VERSION;
+    migrated = true;
+    console.log("roster migration v1 applied:", (store.state.employees || []).length, "people on the allowlist");
+  }
+  if (arraysChanged || migrated) persistState();
+}
+/* First boot on this policy signs everyone out so the next login enrolls
+   a real authenticator. Existing TOTP secrets are kept. Join requests are dropped. */
+function applyAuthPolicy() {
+  if (!auth.users) auth.users = {};
+  if (!auth.sessions) auth.sessions = {};
+  if (!auth.requests) auth.requests = {};
+  if (auth.policy === AUTH_POLICY) return;
+  auth.sessions = {};
+  auth.requests = {};
+  auth.policy = AUTH_POLICY;
+  persistAuth();
+  console.log("auth policy", AUTH_POLICY, "— sessions cleared, open join requests dropped");
 }
 
 /* ---------- helpers ---------- */
 function findEmployee(email) {
-  const e = String(email || "").trim().toLowerCase();
-  if (!e) return null;
+  const e = normalizeEmail(email);
+  if (!isRosterEmail(e)) return null;
   const emps = (store.state && store.state.employees) || [];
-  return emps.find(x => String(x.email).toLowerCase() === e) || null;
+  const emp = emps.find(x => x && normalizeEmail(x.email) === e) || null;
+  if (!emp || emp.pending) return null;
+  return emp;
 }
 function requireSession(req) {
   const h = req.headers.authorization || "";
@@ -140,8 +354,8 @@ function requireSession(req) {
   if (!s) return null;
   if (Date.now() - s.ts > SESSION_DAYS * 864e5) { delete auth.sessions[token]; persistAuth(); return null; }
   const emp = findEmployee(s.email);
-  if (!emp) return null; /* removed from team -> session dies */
-  return { token, email: s.email, emp };
+  if (!emp) return null; /* removed from team, pending, or email no longer allowed */
+  return { token, email: emp.email, emp };
 }
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -157,29 +371,43 @@ function json(res, status, obj) {
   res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", "Clear-Site-Data": '"cache"' });
   res.end(JSON.stringify(obj));
 }
+function rosterSignature(list) {
+  return JSON.stringify((list || []).map(e => [
+    e && e.id || "",
+    normalizeEmail(e && e.email),
+    !!(e && e.admin),
+    !!(e && e.pending)
+  ]).sort());
+}
+function rejectJoin(res) {
+  return json(res, 403, { error: "join_closed" });
+}
 
 /* ---------- server ---------- */
 const server = http.createServer(async (req, res) => {
   const url = (req.url || "/").split("?")[0];
 
   try {
+    if (url === "/api/config" && (req.method === "GET" || req.method === "HEAD")) {
+      return json(res, 200, {
+        authMock: AUTH_MOCK,
+        totpRequired: !AUTH_MOCK,
+        emailRule: EMAIL_RULE
+      });
+    }
+
     if (url === "/api/auth/start" && req.method === "POST") {
       const { email } = JSON.parse(await readBody(req) || "{}");
-      const emp = findEmployee(email);
-      if (!emp) {
-        const key = String(email || "").trim().toLowerCase();
-        const reqRec = auth.requests[key];
-        if (reqRec && reqRec.status === "pending") return json(res, 403, { error: "pending" });
-        if (reqRec && reqRec.status === "declined") return json(res, 403, { error: "declined" });
-        return json(res, 404, { error: "not_on_team", canRequest: true });
-      }
+      const key = normalizeEmail(email);
+      if (!isRosterEmail(key)) return json(res, 400, { error: "invalid_email" });
+      const emp = findEmployee(key);
+      if (!emp) return json(res, 403, { error: "not_on_team" });
       if (AUTH_MOCK) {
         const token = crypto.randomBytes(32).toString("hex");
         auth.sessions[token] = { email: emp.email, ts: Date.now() };
         persistAuth();
         return json(res, 200, { mode: "mock", token, email: emp.email });
       }
-      const key = String(emp.email).toLowerCase();
       let u = auth.users[key];
       if (u && u.confirmed) return json(res, 200, { mode: "code" });
       const secret = b32encode(crypto.randomBytes(20));
@@ -189,16 +417,18 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, {
         mode: "enroll",
         secret,
-        otpauth: "otpauth://totp/" + label + "?secret=" + secret + "&issuer=Shiftly"
+        otpauth: "otpauth://totp/" + label + "?secret=" + secret + "&issuer=Shiftly&algorithm=SHA1&digits=6&period=30"
       });
     }
 
     if (url === "/api/auth/verify" && req.method === "POST") {
       const { email, code } = JSON.parse(await readBody(req) || "{}");
-      const emp = findEmployee(email);
-      const key = emp && String(emp.email).toLowerCase();
-      const u = key && auth.users[key];
-      if (!u) return json(res, 400, { error: "no_enrollment" });
+      const key = normalizeEmail(email);
+      if (!isRosterEmail(key)) return json(res, 400, { error: "invalid_email" });
+      const emp = findEmployee(key);
+      if (!emp) return json(res, 403, { error: "not_on_team" });
+      const u = auth.users[key];
+      if (!u || !u.secret) return json(res, 400, { error: "no_enrollment" });
       if (!totpCheck(u.secret, code)) return json(res, 401, { error: "bad_code" });
       u.confirmed = true;
       const token = crypto.randomBytes(32).toString("hex");
@@ -207,72 +437,34 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { token, email: emp.email });
     }
 
-    if (url === "/api/auth/request" && req.method === "POST") {
-      const { name, email } = JSON.parse(await readBody(req) || "{}");
-      const cleanName = String(name || "").trim();
-      const cleanEmail = String(email || "").trim();
-      if (!cleanName || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail)) return json(res, 400, { error: "invalid" });
-      if (findEmployee(cleanEmail)) return json(res, 200, { ok: true, already: true });
-      const key = cleanEmail.toLowerCase();
-      const existing = auth.requests[key];
-      if (existing && existing.status === "declined") return json(res, 403, { error: "declined" });
-      auth.requests[key] = { name: cleanName.slice(0, 80), email: cleanEmail, ts: Date.now(), status: "pending" };
-      persistAuth();
-      return json(res, 200, { ok: true });
+    /* Open join is closed. Admins add people from the team screen. */
+    if ((url === "/api/auth/request" || url === "/api/auth/approve" || url === "/api/auth/decline") && req.method === "POST") {
+      return rejectJoin(res);
     }
-
     if (url === "/api/auth/requests" && req.method === "GET") {
-      const sess = requireSession(req);
-      if (!sess || !sess.emp.admin) return json(res, 401, { error: "admin_required" });
-      const pending = Object.values(auth.requests)
-        .filter(q => q.status === "pending")
-        .sort((a, b) => a.ts - b.ts)
-        .map(q => ({ name: q.name, email: q.email, ts: q.ts }));
-      return json(res, 200, pending);
-    }
-
-    if (url === "/api/auth/approve" && req.method === "POST") {
-      const sess = requireSession(req);
-      if (!sess || !sess.emp.admin) return json(res, 401, { error: "admin_required" });
-      const { email } = JSON.parse(await readBody(req) || "{}");
-      const key = String(email || "").trim().toLowerCase();
-      const reqRec = auth.requests[key];
-      if (!reqRec) return json(res, 404, { error: "no_request" });
-      if (!findEmployee(reqRec.email)) {
-        const id = "e" + crypto.randomBytes(4).toString("hex").slice(0, 6);
-        store.state.employees.push({ id, name: reqRec.name, email: reqRec.email, admin: false, position: "Shift worker" });
-        store = { version: store.version + 1, state: store.state };
-        persistState();
-      }
-      delete auth.requests[key];
-      persistAuth();
-      return json(res, 200, { ok: true, version: store.version });
-    }
-
-    if (url === "/api/auth/decline" && req.method === "POST") {
-      const sess = requireSession(req);
-      if (!sess || !sess.emp.admin) return json(res, 401, { error: "admin_required" });
-      const { email } = JSON.parse(await readBody(req) || "{}");
-      const key = String(email || "").trim().toLowerCase();
-      if (auth.requests[key]) { auth.requests[key].status = "declined"; persistAuth(); }
-      return json(res, 200, { ok: true });
+      return rejectJoin(res);
     }
 
     if (url === "/api/auth/reset" && req.method === "POST") {
       const sess = requireSession(req);
-      if (!sess || !sess.emp.admin) return json(res, 401, { error: "admin_required" });
+      if (!sess || !sess.emp.admin) return json(res, 403, { error: "admin_required" });
       const { email } = JSON.parse(await readBody(req) || "{}");
-      const key = String(email || "").trim().toLowerCase();
+      const key = normalizeEmail(email);
+      if (!key) return json(res, 400, { error: "invalid_email" });
       delete auth.users[key];
       for (const [t, s] of Object.entries(auth.sessions)) {
-        if (String(s.email).toLowerCase() === key) delete auth.sessions[t];
+        if (normalizeEmail(s.email) === key) delete auth.sessions[t];
       }
       persistAuth();
       return json(res, 200, { ok: true });
     }
 
     if (url === "/api/health") {
-      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.writeHead(200, {
+        "Content-Type": "text/plain",
+        "Cache-Control": "no-store",
+        "X-Auth-Mock": AUTH_MOCK ? "1" : "0"
+      });
       return res.end("ok " + (db ? "db" : "json"));
     }
 
@@ -283,9 +475,30 @@ const server = http.createServer(async (req, res) => {
       if (req.method === "PUT") {
         const parsed = JSON.parse(await readBody(req) || "{}");
         const st = parsed.state;
-        if (!st || !Array.isArray(st.employees) || !st.weeks || !st.settings) return json(res, 400, { error: "invalid body" });
+        if (!st || !Array.isArray(st.employees) || !st.weeks || !st.settings) {
+          return json(res, 400, { error: "invalid_state" });
+        }
         if (parsed.version !== store.version) return json(res, 409, store);
-        store = { version: store.version + 1, state: st };
+        const seen = new Set();
+        for (const e of st.employees) {
+          if (!e || typeof e !== "object") return json(res, 400, { error: "invalid_state" });
+          const email = normalizeEmail(e.email);
+          if (!isRosterEmail(email)) return json(res, 400, { error: "invalid_email", email: String(e.email || "") });
+          if (seen.has(email)) return json(res, 400, { error: "duplicate_email", email });
+          seen.add(email);
+          e.email = email;
+        }
+        if (!st.employees.some(e => e.admin && !e.pending)) return json(res, 400, { error: "last_admin" });
+        if (!sess.emp.admin && rosterSignature(st.employees) !== rosterSignature(store.state.employees)) {
+          return json(res, 403, { error: "admin_required" });
+        }
+        if (!Array.isArray(st.notifications)) {
+          st.notifications = Array.isArray(store.state.notifications) ? store.state.notifications : [];
+        }
+        if (!Array.isArray(st.channels)) {
+          st.channels = Array.isArray(store.state.channels) ? store.state.channels : [];
+        }
+        store = { version: store.version + 1, state: st, rosterVersion: store.rosterVersion || ROSTER_VERSION };
         persistState();
         return json(res, 200, { ok: true, version: store.version });
       }
@@ -381,7 +594,7 @@ function reminderTargets(weekKey) {
   const seen = new Set();
   return (store.state.employees || []).filter(e => {
     if (e.admin || e.pending) return false;
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.email) || /@example\.com$/i.test(e.email)) return false;
+    if (!isRosterEmail(e.email)) return false;
     if (subs[e.id] && subs[e.id].submittedAt) return false;
     const k = e.email.toLowerCase();
     if (seen.has(k)) return false;
@@ -444,7 +657,10 @@ if (process.env.REMINDER_DRY) {
     db = null;
     dbMode = false;
   }
+  applyRosterMigration();
+  applyAuthPolicy();
   server.listen(PORT, () => console.log("Shiftly server listening on :" + PORT +
     " | storage: " + (dbMode ? "PostgreSQL (json backup: " + DATA_DIR + ")" : "JSON files (" + DATA_DIR + ") — set DATABASE_URL for PostgreSQL") +
+    " | auth: " + (AUTH_MOCK ? "MOCK (AUTH_MOCK=1, authenticator skipped)" : "TOTP") +
     (process.env.SMTP_USER ? " | email reminders ON" : " | email reminders OFF (set SMTP_USER + SMTP_PASS)")));
 })();
