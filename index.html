@@ -3067,6 +3067,7 @@ let runtime = null;          // artifact capability namespace
 let downloadsCap = null;
 let readOnly = false;        // set true after a not_writer / not_granted rejection
 let serverMode = false;      // true when a /api/state sync server is behind this page
+let localOnly = false;       // true only after boot finds no sync server (per-browser preview)
 let serverVersion = 0;
 let authToken = null;        // server-mode session token (authenticator-app sign-in)
 let signinStep = null;       // server-mode 2FA step: {mode:"code"|"enroll", email, secret, otpauth}
@@ -3622,7 +3623,7 @@ function render() {
   const entered = viewKey !== lastViewKey;
   lastViewKey = viewKey;
 
-  const banner = (!runtime && !serverMode)
+  const banner = (localOnly && !runtime && !serverMode)
     ? '<div class="banner warning">⚠︎ Preview mode — changes are saved only in this browser. Open the team app for shared saving.</div>'
     : (readOnly ? '<div class="banner warning">⚠︎ You have view-only access, so changes can\'t be saved. Ask the owner to share edit access.</div>' : "");
 
@@ -4103,6 +4104,7 @@ setInterval(() => {
     /* no artifact runtime: try a sync server (Railway etc.), else per-browser demo mode */
     const synced = await initServerSync();
     if (!synced) {
+      localOnly = true;
       try {
         const saved = JSON.parse(localStorage.getItem(LS_STATE));
         if (saved && saved.employees && saved.weeks) state = ensureReserved(saved);
