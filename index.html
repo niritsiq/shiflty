@@ -61,7 +61,8 @@
     line-height: 1.45;
   }
   .mono, .day-date, .wk-label, .secret-box, .shift-badge small, .s-label small,
-  .ts-name small, .mysched-row .d small, .td-head small, .matrix th small,
+  .ts-name small, .mysched-row .d small, .home-row .d small, .home-next-meta .times,
+  .td-head small, .matrix th small,
   .stat .v, input[type="time"], #si-code, .count {
     font-family: var(--mono);
     font-variant-numeric: tabular-nums;
@@ -127,6 +128,7 @@
 
   .page-title { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; margin: 6px 0 2px; text-wrap: balance; }
   .page-sub { color: var(--text-2); margin: 0 0 20px; }
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 
   /* Segmented control */
   .seg {
@@ -530,6 +532,28 @@
   }
   .stat .v { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
   .stat .k { font-size: 12px; color: var(--text-2); font-weight: 500; }
+  .stat .hint { font-size: 11px; color: var(--text-3); margin-top: 4px; line-height: 1.35; }
+  .stat-cards.home-stats { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .home-next-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .home-next-top h3 { margin: 0; }
+  .home-next-day { font-size: 28px; font-weight: 800; letter-spacing: -0.03em; margin: 10px 0 8px; }
+  .home-next-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .home-next-meta .times { color: var(--text-2); }
+  .home-next-meta .team { color: var(--text-2); font-size: 13px; font-weight: 600; }
+  .home-note { color: var(--text-2); font-size: 12px; margin: -4px 0 16px; line-height: 1.45; }
+  .home-split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  .home-list { display: flex; flex-direction: column; gap: 8px; }
+  .home-row {
+    display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+    padding: 10px 12px; background: var(--card-2); border-radius: var(--radius);
+  }
+  .home-row .d { width: 88px; flex-shrink: 0; font-weight: 700; font-size: 13px; }
+  .home-row .d small { display: block; font-weight: 400; color: var(--text-2); }
+  .home-row .team { margin-left: auto; color: var(--text-2); font-size: 12px; font-weight: 600; }
+  .home-row.activity { align-items: flex-start; }
+  .home-activity-copy { display: block; min-width: 0; flex: 1; }
+  .home-activity-copy b { display: block; font-size: 14px; font-weight: 700; }
+  .home-activity-copy .body { display: block; color: var(--text-2); font-size: 13px; margin-top: 2px; }
 
   /* View-change entrance: staggered rise, only when the view actually changes.
      Data mutations re-render without the .enter class, so taps stay instant. */
@@ -553,6 +577,7 @@
     .addbtn:hover { border-color: var(--accent); color: var(--accent); }
     .pick-row:hover { background: var(--card-2); }
     .notif-row:hover { background: var(--card-2); }
+    .home-row:hover { background: var(--chip); }
     .cell:hover { border-color: var(--text-3); }
   }
 
@@ -590,8 +615,12 @@
     .mysched-row .d { width: 84px; }
     .ts-name { width: 104px; }
     .stat-cards { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; }
+    .stat-cards.home-stats { grid-template-columns: 1fr 1fr; }
     .stat { padding: 12px 14px; }
     .stat .v { font-size: 21px; }
+    .home-split { grid-template-columns: 1fr; }
+    .home-next-day { font-size: 22px; }
+    .home-row { flex-wrap: wrap; }
 
     /* submit bar sticks to the bottom of the screen while the grid scrolls */
     .submit-bar {
@@ -3511,6 +3540,7 @@ async function onChannelSelect(id) {
     if (ch.implicit) { loadedScoped = false; loadedChannelId = null; }
     render();
     scrollToFocus();
+    loadHome(true);
     return;
   }
   try {
@@ -3529,6 +3559,7 @@ async function onChannelSelect(id) {
   } catch (e) { toast("Couldn't reach the server."); }
   render();
   scrollToFocus();
+  loadHome(true);
 }
 function openNotificationAt(i) {
   const n = notifItems[i];
@@ -3648,6 +3679,7 @@ function forceSignout(msg) {
   ui.email = null; signinStep = null;
   bellOpen = false; channelCatalog = null; notifItems = [];
   loadedScoped = false; loadedChannelId = null; jumpFocus = null;
+  clearHome();
   saveSession();
   if (msg) toast(msg);
   render();
@@ -3718,7 +3750,10 @@ async function pollServer() {
       changed = true;
     }
     await loadNotifications();
-    if (changed || notifStamp() !== prev) render();
+    if (ui.tab === "home") {
+      if (changed || notifStamp() !== prev) render();
+      loadHome(false);
+    } else if (changed || notifStamp() !== prev) render();
   } catch (e) {}
 }
 
@@ -3909,6 +3944,7 @@ async function doServerSave(isRetry) {
   }
   saving = false;
   if (pendingAdminToggle) scheduleSave(true);
+  else if (authToken && currentUser()) loadHome(false);
 }
 
 async function doPublish() {
@@ -3957,9 +3993,10 @@ function signIn(email) {
   const emp = findEmp(norm);
   if (!emp || emp.pending) return false;
   ui.email = emp.email;
-  ui.tab = emp.admin ? "availability" : "submit";
+  ui.tab = "home";
   if (!ui.week) ui.week = nextWeekKey();
   saveSession(); render();
+  loadHome(true);
   return true;
 }
 function approvePending(id) {
@@ -3973,6 +4010,7 @@ function signOut() {
   ui.email = null; signinStep = null;
   bellOpen = false; channelCatalog = null; notifItems = [];
   loadedScoped = false; loadedChannelId = null; jumpFocus = null;
+  clearHome();
   saveSession(); render();
 }
 
@@ -4287,22 +4325,256 @@ function renderWeeknav() {
   "</div>";
 }
 function chgWeek(d) { jumpFocus = null; ui.week = shiftWeek(ui.week, d); saveSession(); render(); }
-function setTab(t) { jumpFocus = null; ui.tab = t; saveSession(); render(); }
+function setTab(t) { jumpFocus = null; ui.tab = t; saveSession(); render(); if (t === "home") loadHome(false); }
+
+/* Home reads GET /api/me/home (same Bearer session as /api/state).
+   Numbers and hoursNote are rendered as returned. A 404 means the route
+   is not on this server yet. */
+let homeSeq = 0;
+let homeView = { status: "idle", data: null };
+
+function clearHome() {
+  homeSeq++;
+  homeView = { status: "idle", data: null };
+}
+function homeChannelQuery() {
+  const ch = currentChannel();
+  if (ch && ch.id && !ch.implicit) return "?channel=" + encodeURIComponent(ch.id);
+  return "";
+}
+async function loadHome(forceLoading) {
+  const seq = ++homeSeq;
+  if (!currentUser()) return;
+  if (!(serverMode && authToken)) {
+    homeView = { status: "missing", data: null };
+    if (ui.tab === "home") render();
+    return;
+  }
+  if (forceLoading || homeView.status !== "ready") {
+    homeView = { status: "loading", data: null };
+    if (ui.tab === "home") render();
+  }
+  try {
+    const r = await fetch("api/me/home" + homeChannelQuery(), { cache: "no-store", headers: authHeaders() });
+    if (seq !== homeSeq) return;
+    if (r.status === 401) { forceSignout("Your session expired — please sign in again."); return; }
+    if (r.status === 404) {
+      let code = "";
+      try { code = (await r.json()).error || ""; } catch (e) {}
+      if (code === "unknown_channel") {
+        homeView = { status: "error", data: null };
+        toast(authErrorMessage(code));
+      } else {
+        homeView = { status: "missing", data: null };
+      }
+      if (ui.tab === "home") render();
+      return;
+    }
+    if (!r.ok) {
+      homeView = { status: "error", data: null };
+      if (ui.tab === "home") render();
+      return;
+    }
+    const data = await r.json();
+    if (seq !== homeSeq) return;
+    homeView = { status: "ready", data: data };
+    if (ui.tab === "home") render();
+  } catch (e) {
+    if (seq !== homeSeq) return;
+    homeView = { status: "error", data: null };
+    if (ui.tab === "home") render();
+  }
+}
+function fmtHomeHours(n) {
+  if (typeof n !== "number" || !Number.isFinite(n)) return "—";
+  return String(Math.round(n * 100) / 100);
+}
+function ymdParts(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  return { y, mo, d, wd: new Date(Date.UTC(y, mo - 1, d)).getUTCDay() };
+}
+function fmtYmd(iso, withWeekday) {
+  const p = ymdParts(iso);
+  if (!p) return "";
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const label = p.d + " " + months[p.mo - 1];
+  return withWeekday ? DAY_NAMES[p.wd] + " " + label : label;
+}
+function fmtMonthKey(key) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(key || ""));
+  if (!m) return "";
+  const names = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const idx = +m[2] - 1;
+  if (idx < 0 || idx > 11) return "";
+  return names[idx] + " " + m[1];
+}
+function homeTeamName(channelId) {
+  if (!channelId) return "";
+  const lists = [];
+  if (Array.isArray(channelCatalog)) lists.push(channelCatalog);
+  if (Array.isArray(state.channels)) lists.push(state.channels);
+  for (const list of lists) {
+    const hit = list.find(c => c && c.id === channelId && c.name);
+    if (hit) return String(hit.name);
+  }
+  return "";
+}
+function homeDateLine() {
+  const iso = homeView.data && homeView.data.now;
+  if (iso) {
+    const t = Date.parse(iso);
+    if (!Number.isNaN(t)) {
+      const dtf = new Intl.DateTimeFormat("en-GB", {
+        timeZone: (homeView.data && homeView.data.timezone) || "Asia/Jerusalem",
+        weekday: "long", day: "numeric", month: "short"
+      });
+      return dtf.format(new Date(t));
+    }
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jerusalem", weekday: "long", day: "numeric", month: "short"
+  }).format(new Date());
+}
+function renderPageHead(me, admin) {
+  const onHome = ui.tab === "home";
+  const first = esc(((me && me.name) || "").split(" ")[0] || (me && me.name) || "");
+  const title = (!onHome && admin) ? "Dashboard" : ("Hi, " + first);
+  const sub = onHome ? esc(homeDateLine()) : ("Week of " + weekLabel(ui.week));
+  return '<div class="page-head"><div><h1 class="page-title">' + title + "</h1>" +
+    '<p class="page-sub">' + sub + "</p></div>" +
+    (onHome ? "" : renderWeeknav()) + "</div>";
+}
+function renderSeg(tabs) {
+  return '<div class="seg">' + tabs.map(t =>
+    '<button class="' + (ui.tab === t[0] ? "on" : "") + '" onclick="setTab(\'' + t[0] + '\')">' + t[1] + "</button>"
+  ).join("") + "</div>";
+}
+function openHomeShift(weekKey) {
+  if (typeof weekKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(weekKey)) ui.week = weekKey;
+  const me = currentUser();
+  ui.tab = me && me.admin ? "schedule" : "mysched";
+  jumpFocus = null;
+  saveSession();
+  render();
+}
+function openHomeActivity(i) {
+  const rows = (homeView.data && homeView.data.activity) || [];
+  const n = rows[i];
+  if (!n) return;
+  if (n.id && notifItems.some(x => x.id === n.id)) return openNotification(n.id);
+  if (n.week && /^\d{4}-\d{2}-\d{2}$/.test(n.week)) ui.week = n.week;
+  const me = currentUser();
+  ui.tab = me && me.admin ? "schedule" : "mysched";
+  jumpFocus = shiftTarget(n);
+  saveSession();
+  render();
+  scrollToFocus();
+}
+function renderHomeShiftCard(sh) {
+  const team = homeTeamName(sh.channelId);
+  const week = /^\d{4}-\d{2}-\d{2}$/.test(String(sh.week || "")) ? sh.week : "";
+  return '<div class="card home-next">' +
+    '<div class="home-next-top"><h3>Next shift</h3>' +
+    (sh.status === "in_progress" ? '<span class="pill good">On now</span>' : "") +
+    "</div>" +
+    '<div class="home-next-day">' + esc(fmtYmd(sh.date, true) || "Shift") + "</div>" +
+    '<div class="home-next-meta">' +
+      '<span class="shift-pill ' + esc(sh.shiftId || "") + '">' + esc(sh.name || sh.shiftId || "Shift") + "</span>" +
+      '<span class="times">' + esc(sh.start || "") + "–" + esc(sh.end || "") + "</span>" +
+      (sh.endsNextDay ? '<span class="team">ends next day</span>' : "") +
+      (team ? '<span class="team">' + esc(team) + "</span>" : "") +
+    "</div>" +
+    (week ? '<button type="button" class="btn secondary small" style="margin-top:14px" onclick="openHomeShift(\'' + week + '\')">Open this week</button>' : "") +
+    "</div>";
+}
+function renderHome(me) {
+  if (homeView.status === "missing") {
+    return '<div class="card" style="text-align:center;padding:44px 20px">' +
+      "<h3>Home isn't available on this server</h3>" +
+      '<p class="sub" style="margin:4px 0 0">Shift stats come from the home service. This server doesn\'t have it yet.</p></div>';
+  }
+  if (homeView.status === "error") {
+    return '<div class="card" style="text-align:center;padding:44px 20px">' +
+      "<h3>Couldn't load your home</h3>" +
+      '<p class="sub">Check the connection and try again.</p>' +
+      '<button type="button" class="btn" onclick="loadHome(true)">Try again</button></div>';
+  }
+  if (homeView.status !== "ready" || !homeView.data) {
+    return '<div class="card"><h3>Home</h3><p class="sub" style="margin:0">Loading your shifts…</p></div>';
+  }
+  const data = homeView.data;
+  const week = data.thisWeek || {};
+  const month = data.thisMonth || {};
+  const next = data.nextShift;
+  const nextHtml = next
+    ? renderHomeShiftCard(next)
+    : '<div class="card home-next"><h3>Next shift</h3><p class="sub" style="margin:0">No upcoming published shifts.</p></div>';
+  const range = (fmtYmd(week.startsOn, false) && fmtYmd(week.endsOn, false))
+    ? fmtYmd(week.startsOn, false) + " – " + fmtYmd(week.endsOn, false)
+    : "";
+  const monthLabel = fmtMonthKey(month.month);
+  const stats =
+    '<div class="stat-cards home-stats">' +
+      '<div class="stat"><div class="v">' + (typeof week.shiftCount === "number" ? week.shiftCount : "—") + '</div><div class="k">Shifts this week</div>' +
+        (range ? '<div class="hint">' + esc(range) + "</div>" : "") + "</div>" +
+      '<div class="stat"><div class="v">' + fmtHomeHours(week.scheduledHours) + '</div><div class="k">Scheduled hours this week</div></div>' +
+      '<div class="stat"><div class="v">' + fmtHomeHours(month.scheduledHours) + '</div><div class="k">Hours this month (scheduled)</div>' +
+        (monthLabel ? '<div class="hint">' + esc(monthLabel) + "</div>" : "") + "</div>" +
+      '<div class="stat"><div class="v">' + fmtHomeHours(month.actualHours) + '</div><div class="k">Actual hours this month</div></div>' +
+    "</div>" +
+    (typeof data.hoursNote === "string" && data.hoursNote.trim()
+      ? '<p class="home-note">' + esc(data.hoursNote.trim()) + "</p>"
+      : "");
+  const past = Array.isArray(data.pastShifts) ? data.pastShifts : [];
+  const recent = past.length
+    ? '<div class="home-list">' + past.map(sh => {
+        const p = ymdParts(sh.date);
+        const team = homeTeamName(sh.channelId);
+        const weekKey = /^\d{4}-\d{2}-\d{2}$/.test(String(sh.week || "")) ? sh.week : "";
+        const open = weekKey ? ' onclick="openHomeShift(\'' + weekKey + '\')"' : "";
+        return '<button type="button" class="home-row"' + open + ">" +
+          '<span class="d">' + (p ? DAY_SHORT[p.wd] : "") + "<small>" + esc(fmtYmd(sh.date, false)) + "</small></span>" +
+          '<span class="shift-badge ' + esc(sh.shiftId || "") + '"><b>' + esc(sh.name || "") + "</b><small>" + esc((sh.start || "") + "–" + (sh.end || "")) + "</small></span>" +
+          (sh.endsNextDay ? '<span class="team">ends next day</span>' : "") +
+          (team ? '<span class="team">' + esc(team) + "</span>" : "") +
+          "</button>";
+      }).join("") + "</div>"
+    : '<p class="sub" style="margin:0">No past shifts yet.</p>';
+  const activity = Array.isArray(data.activity) ? data.activity : [];
+  const activityHtml = activity.length
+    ? '<div class="home-list">' + activity.map((n, i) => {
+        const body = String(n.body || "").trim();
+        const title = String(n.title || "").trim();
+        const actor = n.actor && n.actor.name ? String(n.actor.name).trim() : "";
+        let main = body || title || "Schedule published";
+        let detail = "";
+        if (actor && main.toLowerCase().indexOf(actor.toLowerCase()) < 0) detail = "Published by " + actor + ".";
+        else if (body && title && title !== body && title !== "Schedule published") detail = title;
+        return '<button type="button" class="home-row activity" onclick="openHomeActivity(' + i + ')">' +
+          '<span class="home-activity-copy"><span class="notif-top"><span class="pill accent">Schedule</span>' +
+          '<span class="when">' + esc(relTime(n.createdAt)) + "</span></span>" +
+          "<b>" + esc(main) + "</b>" +
+          (detail ? '<span class="body">' + esc(detail) + "</span>" : "") +
+          "</span></button>";
+      }).join("") + "</div>"
+    : '<p class="sub" style="margin:0">No recent activity.</p>';
+  return nextHtml + stats +
+    '<div class="home-split">' +
+      '<div class="card"><h3>Recent shifts</h3><p class="sub">Published shifts that have already ended.</p>' + recent + "</div>" +
+      '<div class="card"><h3>Activity</h3><p class="sub">Schedule posts for you.</p>' + activityHtml + "</div>" +
+    "</div>";
+}
 
 /* ===================== WORKER ===================== */
 function renderWorker(me) {
-  const tabs = [["submit","Submit availability"],["mysched","Schedule"]];
-  if (!tabs.some(t => t[0] === ui.tab)) ui.tab = "submit";
-  let html =
-    '<div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">' +
-      '<div><h1 class="page-title">Hi, ' + esc(me.name.split(" ")[0]) + '</h1>' +
-      '<p class="page-sub">Week of ' + weekLabel(ui.week) + "</p></div>" +
-      renderWeeknav() +
-    "</div>" +
-    '<div class="seg">' + tabs.map(t =>
-      '<button class="' + (ui.tab === t[0] ? "on" : "") + '" onclick="setTab(\'' + t[0] + '\')">' + t[1] + "</button>"
-    ).join("") + "</div>";
-  html += ui.tab === "submit" ? renderWorkerSubmit(me) : renderWorkerSchedule(me);
+  const tabs = [["home","Home"],["submit","Submit availability"],["mysched","Schedule"]];
+  if (!tabs.some(t => t[0] === ui.tab)) ui.tab = "home";
+  let html = renderPageHead(me, false) + renderSeg(tabs);
+  if (ui.tab === "home") html += renderHome(me);
+  else if (ui.tab === "submit") html += renderWorkerSubmit(me);
+  else html += renderWorkerSchedule(me);
   return html;
 }
 
@@ -4412,23 +4684,17 @@ function renderWorkerSchedule(me) {
 /* ===================== ADMIN ===================== */
 function renderAdmin(me) {
   const tabs = [
+    ["home","Home"],
     ["availability","Availability"],
     ["submit","My availability"],
     ["schedule","Schedule"],
     ["team","Team"],
     ["settings","Settings"]
   ];
-  if (!tabs.some(t => t[0] === ui.tab)) ui.tab = "availability";
-  let html =
-    '<div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">' +
-      '<div><h1 class="page-title">Dashboard</h1>' +
-      '<p class="page-sub">Week of ' + weekLabel(ui.week) + "</p></div>" +
-      renderWeeknav() +
-    "</div>" +
-    '<div class="seg">' + tabs.map(t =>
-      '<button class="' + (ui.tab === t[0] ? "on" : "") + '" onclick="setTab(\'' + t[0] + '\')">' + t[1] + "</button>"
-    ).join("") + "</div>";
-  if (ui.tab === "submit") html += renderWorkerSubmit(me);
+  if (!tabs.some(t => t[0] === ui.tab)) ui.tab = "home";
+  let html = renderPageHead(me, true) + renderSeg(tabs);
+  if (ui.tab === "home") html += renderHome(me);
+  else if (ui.tab === "submit") html += renderWorkerSubmit(me);
   else if (ui.tab === "availability") html += renderAdminAvailability();
   else if (ui.tab === "schedule") html += renderAdminSchedule();
   else if (ui.tab === "team") html += renderAdminTeam();
@@ -4690,5 +4956,6 @@ document.addEventListener("click", () => {
     }
   }
   render();
+  if (currentUser()) loadHome(homeView.status !== "ready");
 })();
 </script>
