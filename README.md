@@ -15,7 +15,7 @@ Sign-in is email, then a 6-digit code from **Google Authenticator** (TOTP, RFC 6
 An email can sign in only when both are true:
 
 1. It matches `firstname.lastname@cybereason.com` — the local part is lowercase letters with exactly one dot between two name parts (`lotan.hadad@cybereason.com`). The server lowercases input before checking. Addresses with extra dots, a `+tag`, another domain, or a missing last name are rejected.
-2. It is on the team roster (the allowlist). Admins add and remove people in the app. Open join and “request access” are closed.
+2. It is on the team roster (the allowlist). Admins add and remove people in the app, or mint an invite link. Opening that link does not sign anyone in. Open join and “request access” are closed.
 
 The seeded roster is the 14 Cybereason employees listed below. **Nir Itzik** (`nir.itzik@cybereason.com`) is the admin. On the first boot after this change, admin rights that belonged to `niritzik23@gmail.com` are moved to Nir, and that Gmail address is removed because it does not match the email rule. Other people already on the roster whose emails match the rule stay. People who do not match are removed and can no longer sign in. Sessions are cleared once so the next sign-in enrolls a real authenticator. Existing authenticator secrets are kept. Admins can still reset someone’s authenticator from the team screen.
 
@@ -65,7 +65,7 @@ The client can see the flag without signing in:
 | 401 | `bad_code` | Authenticator code does not match |
 | 403 | `join_closed` | Old join / request-access routes |
 | 401 | `auth_required` | Missing or expired session |
-| 403 | `admin_required` | Admin-only action (authenticator reset, roster edits) |
+| 403 | `admin_required` | Admin-only action (authenticator reset, roster edits, invite mint / list / revoke) |
 | 400 | `last_admin` | Save would leave the team with no admin |
 | 400 | `canonical_admin` | Save tried to remove Nir Itzik's admin flag |
 | 400 | `self_demotion` | An admin tried to remove their own admin flag |
@@ -75,6 +75,33 @@ The client can see the flag without signing in:
 | 400 | `channel_required` | Saved without `?channel=` after real channels exist |
 | 403 | `not_a_member` | Channel exists, but this session is not a member |
 | 404 | `unknown_channel` | Channel id is not in `state.channels` |
+| 400 | `channel_not_supported` | `POST /api/invites` included `channelId` (or `?channel=`) |
+| 400 | `no_team` | Admin minted an invite but is not on a team while teams exist |
+| 400 | `invalid_invite` | Accept token is missing, unknown, or not the one that was minted |
+| 400 | `expired` | Invite is past `expiresAt` |
+| 400 | `revoked` | Invite was revoked |
+| 409 | `already_used` | Invite was already accepted, or a revoke targeted a used invite |
+| 409 | `already_on_team` | That email is already an active roster member (the invite stays unused) |
+| 429 | `rate_limited` | Too many `POST /api/invites/accept` attempts from this address |
+| 404 | `not_found` | Invite id does not exist |
+
+## Invite links
+
+An admin mints a single-use link that adds one `firstname.lastname@cybereason.com` address to the roster. The link does not sign that person in, does not skip Google Authenticator, and does not open signup for any other domain. v1 does not take `channelId`. The person joins the team the admin was on when the link was minted. When `channels` is empty, that is the one implicit team.
+
+The raw token is returned once, in `url`. The server stores SHA-256 in `auth.json` (the `auth` value in Postgres when `DATABASE_URL` is set), next to sessions. Copy the link from the mint response. The list does not contain it, so a restart cannot show it again.
+
+`POST /api/invites` with an admin session and `{}` → `{ "id", "url", "expiresAt" }`.
+
+`url` is the origin of `APP_URL` when that variable is an `http` or `https` URL, otherwise the request origin (`X-Forwarded-Proto` and `X-Forwarded-Host` when those headers are a host), plus `/?invite=<token>`. Example: `https://shiflty.onrender.com/?invite=<token>`. It is not `/invite/<token>`. A body field `channelId`, or `?channel=` / `?channelId=` on this route, is `400 channel_not_supported`.
+
+`GET /api/invites` → `{ "invites": [ ... ] }`, newest first. Each item has `id`, `status` (`pending`, `used`, or `revoked`), `createdAt`, `expiresAt`, `createdBy`, `usedAt`, `usedBy`, and `revokedAt`. A pending row can be past `expiresAt`. Accept then returns `expired` and leaves the row unused. There is no token and no hash in this list.
+
+`DELETE /api/invites/:id` revokes a link that has not been used → `{ "ok": true, "id", "status": "revoked", "revokedAt" }`. Revoking again returns the same shape. A used link is `409 already_used`.
+
+`POST /api/invites/accept` with `{ "token", "email" }` → `{ "ok": true, "email" }`. There is no session token in that body. The next request is the normal `POST /api/auth/start`, then `POST /api/auth/verify` when a code is required. A pending roster row for that email is activated and the link is used. An email that is already an active member does not use the link (`409 already_on_team`).
+
+The token is a JSON field. `POST /api/invites/accept?invite=...` does not read the query string. Accept attempts are limited to 10 per 15 minutes per client address, in memory on this process.
 
 ## Notifications and teams
 
@@ -188,7 +215,9 @@ Useful environment variables:
 - `SHIFTLY_DATA_DIR` — where `state.json` and `auth.json` go. Defaults to `/data` when that directory exists, otherwise the app directory. Those files are gitignored; do not commit them. `reminders-sent.json` is an old email ledger and is no longer written.
 - `RESEND_API_KEY` — required to send email. The server reads `process.env.RESEND_API_KEY` and never logs it. Already set on the Render web service. If it is unset, email is skipped and in-app notifications still save.
 - `RESEND_FROM` — required to send email. The From header, read only from `process.env.RESEND_FROM`. There is no default. If it is unset, email is skipped (the log says `RESEND_FROM is unset`) and in-app notifications still save. On the Render web service this is set to `Shiflty <onboarding@resend.dev>`.
-- `APP_URL` — optional. When it is an `http` or `https` URL, reminder and publish emails append it as a link.
+- `APP_URL` — optional. When it is an `http` or `https` URL, reminder and publish emails append it as a link, and invite links use its origin plus `/?invite=<token>`. If it is unset or not an http(s) URL, the invite link uses the request origin.
+- `INVITE_TTL_HOURS` — lifetime of a new invite, in hours. Default `48`. A missing or non-positive value keeps 48 hours.
+- `INVITE_NOW` — ISO timestamp that freezes invite expiry checks, the same idea as `HOME_NOW`. Leave it unset in production.
 
 ## Email (Resend)
 
@@ -217,4 +246,4 @@ The existing web process schedules this. There is no Render cron job. The free i
 
 The rows use `type: "availability_reminder"` (`title`, `body`, `createdAt`, `week`, `recipientIds`, `readBy`, `slot`, and `channelId` when the week belongs to a real team). Email for those rows is described above.
 
-`node test/auth.js` checks the email rule, TOTP, the closed join routes, and the seeded roster. `node test/notifications.js` checks the bell routes and that one team cannot read another. `node test/reminders.js` checks the three Jerusalem slots, skip-if-submitted, and catch-up without duplicate bell rows. `node test/home.js` checks the home hour rules (Israel week, scheduled month, actual = already ended, no clock-in) and that publishing records who did it. `node test/mail.js` checks Resend with a mocked API: a reminder is attempted once, a submitted person is skipped, a missing API key skips the send, a publish email fires once, and the admin smoke route returns Resend’s result.
+`node test/auth.js` checks the email rule, TOTP, the closed join routes, and the seeded roster. `node test/invites.js` checks admin mint, list, and revoke, the `/?invite=` link, hashed tokens, and accept (happy path, expired, reused, revoked, a non-Cybereason email, and a non-admin mint). `node test/notifications.js` checks the bell routes and that one team cannot read another. `node test/reminders.js` checks the three Jerusalem slots, skip-if-submitted, and catch-up without duplicate bell rows. `node test/home.js` checks the home hour rules (Israel week, scheduled month, actual = already ended, no clock-in) and that publishing records who did it. `node test/mail.js` checks Resend with a mocked API: a reminder is attempted once, a submitted person is skipped, a missing API key skips the send, a publish email fires once, and the admin smoke route returns Resend’s result.

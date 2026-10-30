@@ -21,6 +21,20 @@
      POST /api/auth/reset  {email}    -> 200 (admin session) — clears that user's authenticator
      POST /api/auth/request|approve|decline, GET /api/auth/requests
                                       -> 403 join_closed
+     POST /api/invites     {}         -> admin session. {id, url, expiresAt}
+                                      url is the APP_URL origin, or the request
+                                      origin, plus /?invite=<token>. No channelId.
+                                      The raw token is returned once. auth.json
+                                      keeps SHA-256 only. TTL is INVITE_TTL_HOURS
+                                      (default 48).
+     GET  /api/invites                -> admin. pending / used / revoked, no token
+     DELETE /api/invites/:id          -> admin. revoke an unused link
+     POST /api/invites/accept {token, email}
+                                      -> {ok, email}. Adds that Cybereason
+                                      address to the roster and to the team
+                                      the admin was on when the link was minted.
+                                      Does not return a session. Sign-in is
+                                      still /api/auth/start and /api/auth/verify.
      GET  /api/state[?channel=]       -> {version, state}            (session)
                                       When channels[] is empty this is the whole
                                       roster (v1). When channels exist, the body
@@ -68,9 +82,13 @@
    AUTH_MOCK=1 skips the authenticator step (local demos only). Real TOTP
    is required when that variable is unset.
 
+   Invite links are single-use. Accepting one adds a matching email to
+   the allowlist. It does not enroll an authenticator and it does not
+   issue a session. INVITE_NOW (ISO) freezes invite expiry for tests.
+
    Storage (SHIFTLY_DATA_DIR, else /data when that directory exists, else the app dir):
      state.json — shared app state (seeded from index.html on first boot)
-     auth.json  — TOTP secrets + sessions (never sent to clients) */
+     auth.json  — TOTP secrets, sessions, and invite hashes (never sent to clients) */
 "use strict";
 const http = require("http");
 const fs = require("fs");
@@ -101,6 +119,11 @@ const LEGACY_ADMIN_EMAIL = "niritzik23@gmail.com";
    read; it is only reloaded from the database at boot. */
 const CANONICAL_ADMIN_EMAIL = "nir.itzik@cybereason.com";
 const EMAIL_RULE = "firstname.lastname@cybereason.com";
+/* New invite links last this many hours unless INVITE_TTL_HOURS is set. */
+const INVITE_TTL_HOURS_DEFAULT = 48;
+/* Accept posts per client address. One Node process on the free instance. */
+const INVITE_ACCEPT_WINDOW_MS = 15 * 60 * 1000;
+const INVITE_ACCEPT_MAX = 10;
 
 /* Canonical v1 roster. Migration adds anyone missing once; admins may
    remove people later without them being re-added on the next boot.
@@ -182,8 +205,9 @@ function persistState() {
 /* ---------- auth store ---------- */
 let auth;
 try { auth = JSON.parse(fs.readFileSync(AUTH_FILE, "utf8")); if (!auth.users) throw 0; }
-catch (e) { auth = { users: {}, sessions: {}, requests: {} }; }
+catch (e) { auth = { users: {}, sessions: {}, requests: {}, invites: {} }; }
 if (!auth.requests) auth.requests = {};
+if (!auth.invites || typeof auth.invites !== "object" || Array.isArray(auth.invites)) auth.invites = {};
 function persistAuth() {
   try { fs.writeFileSync(AUTH_FILE, JSON.stringify(auth)); }
   catch (e) { console.error("persist auth failed", e); }
@@ -404,6 +428,7 @@ function applyAuthPolicy() {
   if (!auth.users) auth.users = {};
   if (!auth.sessions) auth.sessions = {};
   if (!auth.requests) auth.requests = {};
+  if (!auth.invites || typeof auth.invites !== "object" || Array.isArray(auth.invites)) auth.invites = {};
   if (auth.policy === AUTH_POLICY) return;
   auth.sessions = {};
   auth.requests = {};
@@ -545,6 +570,195 @@ function reconcileAdmins(st, sess, toggle) {
 }
 function rejectJoin(res) {
   return json(res, 403, { error: "join_closed" });
+}
+
+/* ---------- invite links ----------
+   Mint stores SHA-256 only. The raw token leaves in the one mint response,
+   inside /?invite= on the app origin. Accept adds a roster row (and, when
+   this deploy already has teams, that admin's current team). The caller
+   still has to finish /api/auth/start and /api/auth/verify. */
+function inviteTtlMs() {
+  const raw = String(process.env.INVITE_TTL_HOURS == null ? "" : process.env.INVITE_TTL_HOURS).trim();
+  if (!raw) return INVITE_TTL_HOURS_DEFAULT * 3600 * 1000;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return INVITE_TTL_HOURS_DEFAULT * 3600 * 1000;
+  return n * 3600 * 1000;
+}
+function inviteNowMs() {
+  const raw = process.env.INVITE_NOW;
+  if (raw) {
+    const t = Date.parse(String(raw));
+    if (!Number.isNaN(t)) return t;
+  }
+  return Date.now();
+}
+function hashInviteToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+function appOrigin(req) {
+  const configured = String(process.env.APP_URL || "").trim();
+  if (configured) {
+    try {
+      const u = new URL(configured);
+      if (u.protocol === "http:" || u.protocol === "https:") return u.origin;
+    } catch (e) { /* fall through to the request host */ }
+  }
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  const host = forwardedHost || String(req.headers.host || "").trim();
+  if (!host || !/^[A-Za-z0-9.\-:\[\]]+$/.test(host)) return "http://localhost";
+  let proto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  if (proto !== "http" && proto !== "https") proto = "http";
+  return proto + "://" + host;
+}
+function inviteUrl(req, token) {
+  return appOrigin(req) + "/?invite=" + encodeURIComponent(token);
+}
+function displayNameFromEmail(email) {
+  return email.split("@")[0].split(".").filter(Boolean).map(part => {
+    return part.charAt(0).toUpperCase() + part.slice(1);
+  }).join(" ");
+}
+function freshEmployeeId(email) {
+  const base = "e_" + email.split("@")[0].replace(/\./g, "_");
+  const used = new Set((store.state.employees || []).map(e => e && e.id).filter(Boolean));
+  if (!used.has(base)) return base;
+  let id = base;
+  do { id = base + "_" + crypto.randomBytes(3).toString("hex"); } while (used.has(id));
+  return id;
+}
+/* Same pick as GET /api/state with no ?channel=: the admin's default team,
+   else the first team they belong to. No stored channels means the implicit
+   roster, and the invite does not name a channel. */
+function currentTeamId(emp) {
+  if (!storedChannels().length) return { id: null };
+  const mine = channelsFor(emp);
+  const ch = mine.find(c => c.default) || mine[0];
+  if (!ch) return { error: "no_team" };
+  return { id: ch.id };
+}
+function inviteStatus(inv) {
+  if (inv.usedAt) return "used";
+  if (inv.revokedAt) return "revoked";
+  return "pending";
+}
+function publicInvite(inv) {
+  return {
+    id: inv.id,
+    status: inviteStatus(inv),
+    createdAt: inv.createdAt,
+    expiresAt: inv.expiresAt,
+    createdBy: inv.createdBy,
+    usedAt: inv.usedAt || null,
+    usedBy: inv.usedBy || null,
+    revokedAt: inv.revokedAt || null
+  };
+}
+function listInvites() {
+  const rows = Object.values(auth.invites || {}).filter(inv => inv && inv.id);
+  rows.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  return rows.map(publicInvite);
+}
+function findInvite(token) {
+  const want = Buffer.from(hashInviteToken(token), "hex");
+  const list = Object.values(auth.invites || {});
+  let found = null;
+  for (const inv of list) {
+    if (!inv || typeof inv.tokenHash !== "string" || !/^[a-f0-9]{64}$/.test(inv.tokenHash)) continue;
+    const got = Buffer.from(inv.tokenHash, "hex");
+    if (got.length === want.length && crypto.timingSafeEqual(got, want)) found = inv;
+  }
+  return found;
+}
+function adminSession(req, res) {
+  const sess = requireSession(req);
+  if (!sess) { json(res, 401, { error: "auth_required" }); return null; }
+  if (!sess.emp.admin) { json(res, 403, { error: "admin_required" }); return null; }
+  return sess;
+}
+function mintInvite(sess, req) {
+  const team = currentTeamId(sess.emp);
+  if (team.error) return { status: 400, body: { error: team.error } };
+  const token = crypto.randomBytes(32).toString("base64url");
+  const id = "inv_" + crypto.randomBytes(9).toString("hex");
+  const created = inviteNowMs();
+  const rec = {
+    id,
+    tokenHash: hashInviteToken(token),
+    createdAt: new Date(created).toISOString(),
+    expiresAt: new Date(created + inviteTtlMs()).toISOString(),
+    createdBy: sess.email,
+    channelId: team.id,
+    usedAt: null,
+    usedBy: null,
+    revokedAt: null
+  };
+  auth.invites[id] = rec;
+  persistAuth();
+  return { status: 200, body: { id, url: inviteUrl(req, token), expiresAt: rec.expiresAt } };
+}
+function revokeInvite(id) {
+  const inv = auth.invites && auth.invites[id];
+  if (!inv) return { status: 404, body: { error: "not_found" } };
+  if (inv.usedAt) return { status: 409, body: { error: "already_used" } };
+  if (!inv.revokedAt) {
+    inv.revokedAt = new Date(inviteNowMs()).toISOString();
+    persistAuth();
+  }
+  return { status: 200, body: { ok: true, id: inv.id, status: "revoked", revokedAt: inv.revokedAt } };
+}
+function inviteExpired(inv) {
+  const exp = Date.parse(inv.expiresAt);
+  return !Number.isFinite(exp) || exp <= inviteNowMs();
+}
+/* Adds the address or clears pending on a row that is already there.
+   An active roster email does not consume the link. */
+function acceptInvite(inv, email) {
+  const emps = store.state.employees || (store.state.employees = []);
+  const existing = emps.find(e => e && normalizeEmail(e.email) === email) || null;
+  if (existing && !existing.pending) return { status: 409, body: { error: "already_on_team" } };
+  let channel = null;
+  if (inv.channelId) {
+    channel = storedChannels().find(c => c.id === inv.channelId) || null;
+    if (!channel) return { status: 400, body: { error: "unknown_channel" } };
+  }
+  let emp = existing;
+  if (emp) {
+    delete emp.pending;
+    emp.email = email;
+    if (!String(emp.name || "").trim()) emp.name = displayNameFromEmail(email);
+    if (!emp.position) emp.position = "Shift worker";
+    emp.admin = email === CANONICAL_ADMIN_EMAIL;
+  } else {
+    emp = {
+      id: freshEmployeeId(email),
+      name: displayNameFromEmail(email),
+      email,
+      admin: false,
+      position: "Shift worker"
+    };
+    emps.push(emp);
+  }
+  if (channel && !channel.memberIds.includes(emp.id)) channel.memberIds.push(emp.id);
+  inv.usedAt = new Date(inviteNowMs()).toISOString();
+  inv.usedBy = email;
+  store.version = (store.version || 1) + 1;
+  persistState();
+  persistAuth();
+  return { status: 200, body: { ok: true, email } };
+}
+const inviteAcceptHits = new Map();
+function allowInviteAccept(req) {
+  const ip = String((req.socket && req.socket.remoteAddress) || "unknown");
+  const now = Date.now();
+  const prev = inviteAcceptHits.get(ip) || [];
+  const fresh = prev.filter(t => now - t < INVITE_ACCEPT_WINDOW_MS);
+  if (fresh.length >= INVITE_ACCEPT_MAX) {
+    inviteAcceptHits.set(ip, fresh);
+    return false;
+  }
+  fresh.push(now);
+  inviteAcceptHits.set(ip, fresh);
+  return true;
 }
 
 /* ---------- channels + notifications (stub) ----------
@@ -994,6 +1208,54 @@ const server = http.createServer(async (req, res) => {
       dropSessionsFor(key);
       persistAuth();
       return json(res, 200, { ok: true });
+    }
+
+    /* Token is a POST field. The browser link uses /?invite= so the page
+       can read it; this route does not. */
+    if (url === "/api/invites/accept") {
+      if (req.method !== "POST") { res.writeHead(405); return res.end(); }
+      if (!allowInviteAccept(req)) return json(res, 429, { error: "rate_limited" });
+      const body = JSON.parse(await readBody(req) || "{}");
+      if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "bad_request" });
+      const email = normalizeEmail(body.email);
+      if (!isRosterEmail(email)) return json(res, 400, { error: "invalid_email" });
+      const token = typeof body.token === "string" ? body.token.trim() : "";
+      if (!token || token.length > 200) return json(res, 400, { error: "invalid_invite" });
+      const inv = findInvite(token);
+      if (!inv) return json(res, 400, { error: "invalid_invite" });
+      if (inv.usedAt) return json(res, 409, { error: "already_used" });
+      if (inv.revokedAt) return json(res, 400, { error: "revoked" });
+      if (inviteExpired(inv)) return json(res, 400, { error: "expired" });
+      const accepted = acceptInvite(inv, email);
+      return json(res, accepted.status, accepted.body);
+    }
+
+    if (url === "/api/invites") {
+      const sess = adminSession(req, res);
+      if (!sess) return;
+      if (req.method === "GET") return json(res, 200, { invites: listInvites() });
+      if (req.method === "POST") {
+        if (reqUrl.searchParams.has("channel") || reqUrl.searchParams.has("channelId")) {
+          return json(res, 400, { error: "channel_not_supported" });
+        }
+        const body = JSON.parse(await readBody(req) || "{}");
+        if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "bad_request" });
+        if (Object.prototype.hasOwnProperty.call(body, "channelId")) {
+          return json(res, 400, { error: "channel_not_supported" });
+        }
+        const minted = mintInvite(sess, req);
+        return json(res, minted.status, minted.body);
+      }
+      res.writeHead(405); return res.end();
+    }
+
+    const invitePath = url.match(/^\/api\/invites\/(inv_[a-f0-9]+)$/);
+    if (invitePath) {
+      if (req.method !== "DELETE") { res.writeHead(405); return res.end(); }
+      const sess = adminSession(req, res);
+      if (!sess) return;
+      const revoked = revokeInvite(invitePath[1]);
+      return json(res, revoked.status, revoked.body);
     }
 
     if (url === "/api/health") {
